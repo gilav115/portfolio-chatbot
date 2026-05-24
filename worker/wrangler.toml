@@ -1,0 +1,23 @@
+# Cloudflare Workers deployment configuration.
+# Reference: https://developers.cloudflare.com/workers/wrangler/configuration/
+
+name = "portfolio-chatbot-worker"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+
+# ── Secrets (set via build script or CLI — never commit values here) ───────────
+#
+# Run once to set your API key and widget token:
+#   cd worker && npx wrangler secret put LLM_API_KEY
+#   cd worker && npx wrangler secret put WIDGET_TOKEN
+#
+# The build script (scripts/build-and-deploy.sh) sets these automatically:
+#   BOT_CONFIG_JSON  — contents of setup/config.json
+#   PROFILE_TEXT     — concatenated contents of setup/*.md
+#
+# All secrets are encrypted at rest in Cloudflare. They are never in source code.
+
+# ── Rate limiting note ─────────────────────────────────────────────────────────
+# The in-memory rate limit store in guards.js is per-isolate. Cloudflare may
+# spin up multiple isolates under load, so limits are approximate rather than
+# exact across all traffic. For stricter enforcement, use Durable Objects or KV.

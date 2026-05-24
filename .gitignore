@@ -1,0 +1,22 @@
+node_modules/
+.wrangler/
+dist/
+.env
+.env.*
+*.secret
+.DS_Store
+Thumbs.db
+
+# ── Personal data — never commit these ────────────────────────────────────────
+# Everything you fill in lives in setup/. Those files are gitignored.
+# setup/examples/ contains tracked example files — those are safe to commit.
+setup/*.md
+setup/config.json
+
+# Claude Code project settings — contain absolute paths from the dev machine.
+.claude/
+
+# Legacy folders — gitignored in case they contain personal data.
+knowledge/
+profile/
+config/
