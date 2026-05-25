@@ -30,6 +30,9 @@ const LEAD_INTENT_KEYWORDS = [
   'book a call', 'get in touch', 'reach out', 'quote', 'available for',
   'interested in working', 'engage', 'start a project', 'consult',
   'how much', 'what do you charge',
+  'contact', 'how can i reach', 'how to reach', 'reach you', 'your email',
+  'email address', 'connect with you', 'how do i message', 'linkedin',
+  'whatsapp', 'drop you', 'send you',
 ];
 
 export default {
@@ -108,7 +111,10 @@ async function handleChat(request, env, config) {
   const topicError = guardTopic(message, config);
   if (topicError) return buildResponse({ reply: topicError }, 200, request, config);
 
-  const profileText  = env.PROFILE_TEXT ?? '';
+  const profileText = (env.PROFILE_TEXT_1 ?? env.PROFILE_TEXT ?? '')
+    + (env.PROFILE_TEXT_2 ?? '')
+    + (env.PROFILE_TEXT_3 ?? '')
+    + (env.PROFILE_TEXT_4 ?? '');
   const systemPrompt = buildSystemPrompt(config, profileText);
   const trimmedHistory = trimHistory(history, config);
 

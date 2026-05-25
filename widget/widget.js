@@ -1,8 +1,12 @@
 (function () {
   'use strict';
 
+  // Captured synchronously — null for async/defer scripts, valid for inline/sync scripts.
+  const _thisScript = document.currentScript;
+
+  function init() {
   // Config from script tag
-  const script       = document.currentScript || document.querySelector('[data-worker]');
+  const script       = _thisScript || document.querySelector('[data-worker]');
   const WORKER_URL   = (script && script.dataset.worker)  || '';
   const WIDGET_TOKEN = (script && script.dataset.token)   || '';
   const BOT_NAME     = (script && script.dataset.name)    || 'Assistant';
@@ -20,7 +24,8 @@
   const history     = [];
   let isOpen        = false;
   let isWaiting     = false;
-  let configFetched = false;
+  let welcomeShown  = false;
+  let remoteConfig  = null;
   let suggestionsEl = null;
   const ctasShown   = new Set();
 
@@ -265,7 +270,14 @@
     toggleBtn.setAttribute('aria-expanded', 'true');
     toggleBtn.setAttribute('aria-label', 'Close chat');
     inputEl.focus();
-    fetchWidgetConfig();
+    if (!welcomeShown) {
+      welcomeShown = true;
+      const welcome = remoteConfig?.welcomeMessage || WELCOME;
+      appendMessage('bot', welcome);
+      if (Array.isArray(remoteConfig?.suggestedQuestions) && remoteConfig.suggestedQuestions.length) {
+        showSuggestions(remoteConfig.suggestedQuestions);
+      }
+    }
   }
 
   function closePanel() {
@@ -298,24 +310,25 @@
     inputEl.style.height = inputEl.scrollHeight + 'px';
   });
 
-  // Fetch suggested questions from worker on first open
-  async function fetchWidgetConfig() {
-    if (configFetched) return;
-    configFetched = true;
+  // Fetch config from worker eagerly on load — welcome and suggestions applied on first open
+  async function loadRemoteConfig() {
     try {
       const resp = await fetch(`${WORKER_URL}/widget-config`, {
         signal: AbortSignal.timeout(5000),
       });
       if (!resp.ok) return;
-      const cfg = await resp.json();
-      if (history.length > 0) return;
-      if (Array.isArray(cfg.suggestedQuestions) && cfg.suggestedQuestions.length) {
-        showSuggestions(cfg.suggestedQuestions);
+      remoteConfig = await resp.json();
+      if (remoteConfig.botName) {
+        const headerName = shadow.getElementById('header-name');
+        const avatar     = shadow.getElementById('avatar');
+        if (headerName) headerName.textContent = remoteConfig.botName;
+        if (avatar)     avatar.textContent = (remoteConfig.botName.trim()[0] || 'A').toUpperCase();
       }
     } catch {
       // non-critical: silently ignore
     }
   }
+  loadRemoteConfig();
 
   function showSuggestions(questions) {
     if (suggestionsEl) { suggestionsEl.remove(); suggestionsEl = null; }
@@ -490,6 +503,11 @@
     custom:   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"/></svg>',
   };
 
-  // Init
-  appendMessage('bot', WELCOME);
+  } // end init()
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
 })();

@@ -1,3 +1,5 @@
+<!-- PORTFOLIO-CHATBOT-EXAMPLE: Delete this line and replace the content below with your own information. The deploy script will skip this file until this line is removed. -->
+
 # Services
 
 **Fractional CPO**: Embedded product leadership for companies that need senior ownership without a full-time hire. Works alongside the CEO and engineering lead to define roadmap, run discovery, and build product culture.

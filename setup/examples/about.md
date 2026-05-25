@@ -1,3 +1,5 @@
+<!-- PORTFOLIO-CHATBOT-EXAMPLE: Delete this line and replace the content below with your own information. The deploy script will skip this file until this line is removed. -->
+
 # About
 
 Alex Chen: Independent product consultant and fractional CPO, based in London.

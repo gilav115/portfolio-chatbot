@@ -1,7 +1,7 @@
 # Cloudflare Workers deployment configuration.
 # Reference: https://developers.cloudflare.com/workers/wrangler/configuration/
 
-name = "portfolio-chatbot-worker"
+name = "gil-bot"
 main = "src/index.js"
 compatibility_date = "2024-01-01"
 
