@@ -270,14 +270,16 @@
     toggleBtn.setAttribute('aria-expanded', 'true');
     toggleBtn.setAttribute('aria-label', 'Close chat');
     inputEl.focus();
-    if (!welcomeShown) {
-      welcomeShown = true;
-      const welcome = remoteConfig?.welcomeMessage || WELCOME;
-      appendMessage('bot', welcome);
-      if (Array.isArray(remoteConfig?.suggestedQuestions) && remoteConfig.suggestedQuestions.length) {
-        showSuggestions(remoteConfig.suggestedQuestions);
-      }
-    }
+    showWelcomeIfReady();
+  }
+
+  function showWelcomeIfReady() {
+    if (welcomeShown || !isOpen) return;
+    if (remoteConfig === null) return; // defer until config arrives or times out
+    welcomeShown = true;
+    appendMessage('bot', remoteConfig.welcomeMessage || WELCOME);
+    const qs = remoteConfig.suggestedQuestions;
+    if (Array.isArray(qs) && qs.length) showSuggestions(qs);
   }
 
   function closePanel() {
@@ -310,13 +312,15 @@
     inputEl.style.height = inputEl.scrollHeight + 'px';
   });
 
-  // Fetch config from worker eagerly on load — welcome and suggestions applied on first open
+  // Fetch config from worker eagerly on load.
+  // Sets remoteConfig (or {} on error) then calls showWelcomeIfReady() so
+  // the welcome message appears whether the panel opened before or after the fetch.
   async function loadRemoteConfig() {
     try {
       const resp = await fetch(`${WORKER_URL}/widget-config`, {
         signal: AbortSignal.timeout(5000),
       });
-      if (!resp.ok) return;
+      if (!resp.ok) throw new Error('config fetch failed');
       remoteConfig = await resp.json();
       if (remoteConfig.botName) {
         const headerName = shadow.getElementById('header-name');
@@ -325,8 +329,9 @@
         if (avatar)     avatar.textContent = (remoteConfig.botName.trim()[0] || 'A').toUpperCase();
       }
     } catch {
-      // non-critical: silently ignore
+      remoteConfig = remoteConfig ?? {}; // unblock showWelcomeIfReady with fallback values
     }
+    showWelcomeIfReady();
   }
   loadRemoteConfig();
 

@@ -111,10 +111,8 @@ async function handleChat(request, env, config) {
   const topicError = guardTopic(message, config);
   if (topicError) return buildResponse({ reply: topicError }, 200, request, config);
 
-  const profileText = (env.PROFILE_TEXT_1 ?? env.PROFILE_TEXT ?? '')
-    + (env.PROFILE_TEXT_2 ?? '')
-    + (env.PROFILE_TEXT_3 ?? '')
-    + (env.PROFILE_TEXT_4 ?? '');
+  let profileText = env.PROFILE_TEXT_1 ?? env.PROFILE_TEXT ?? '';
+  for (let i = 2; i <= 10; i++) profileText += env[`PROFILE_TEXT_${i}`] ?? '';
   const systemPrompt = buildSystemPrompt(config, profileText);
   const trimmedHistory = trimHistory(history, config);
 

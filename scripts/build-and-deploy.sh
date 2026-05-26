@@ -274,6 +274,15 @@ else
     CHUNK_OFFSET=$((CHUNK_OFFSET + CHUNK_SIZE))
   done
   ok "Profile uploaded ($CHUNK_NUM chunk(s), $PROFILE_CHARS characters)."
+
+  # Delete any leftover chunks from a previous larger profile.
+  # Without this, shrinking a profile leaves old secrets that get appended to the prompt.
+  for _i in $(seq $(( CHUNK_NUM + 1 )) 10); do
+    if echo "$SECRET_LIST" | grep -q "PROFILE_TEXT_$_i"; then
+      printf 'y\n' | "$WRANGLER" secret delete "PROFILE_TEXT_$_i" 2>&1 | grep -v "^$" | sed 's/^/           /' || true
+      ok "Removed stale profile chunk PROFILE_TEXT_$_i"
+    fi
+  done
 fi
 
 
