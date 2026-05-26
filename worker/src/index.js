@@ -235,18 +235,22 @@ async function callAnthropic(systemPrompt, history, message, env, config) {
 
 function buildResponse(body, status, request, config) {
   const allowedOrigins = config?.security?.allowedOrigins ?? [];
-  const origin         = request?.headers?.get('Origin') ?? '*';
-  const corsOrigin     = (!allowedOrigins.length || allowedOrigins.includes(origin))
-    ? origin
-    : '';
+  const origin         = request?.headers?.get('Origin') ?? '';
+  const originAllowed  = !allowedOrigins.length || allowedOrigins.includes(origin);
 
   const headers = {
-    'Content-Type':                     'application/json',
-    'Access-Control-Allow-Origin':      corsOrigin || '*',
-    'Access-Control-Allow-Methods':     'POST, GET, OPTIONS',
-    'Access-Control-Allow-Headers':     'Content-Type, X-Widget-Token',
-    'X-Content-Type-Options':           'nosniff',
+    'Content-Type':               'application/json',
+    'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, X-Widget-Token',
+    'X-Content-Type-Options':     'nosniff',
   };
+
+  // Only set Access-Control-Allow-Origin when the origin is permitted.
+  // Omitting it for blocked origins prevents the browser from reading
+  // the cross-origin response body, even on 4xx error replies.
+  if (originAllowed && origin) {
+    headers['Access-Control-Allow-Origin'] = origin;
+  }
 
   if (status === 204 || body === null) {
     return new Response(null, { status, headers });
