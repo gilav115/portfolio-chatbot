@@ -1,3 +1,5 @@
+<!-- PORTFOLIO-CHATBOT-EXAMPLE: Delete this line and replace the content below with your own information. The deploy script will skip this file until this line is removed. -->
+
 # Boundaries
 
 The bot must not:

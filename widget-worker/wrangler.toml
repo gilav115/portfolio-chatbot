@@ -1,0 +1,12 @@
+# Deploys widget/ as Cloudflare Workers Static Assets.
+# This updates the <name>.<account>.workers.dev URL to serve both:
+#   /           the standalone chat page (index.html, generated at deploy time)
+#   /widget.js  the embeddable script for any website
+#
+# Deployed by scripts/build-and-deploy.sh — do not run wrangler deploy here manually.
+
+name = "gil-bot-widget"
+compatibility_date = "2024-09-23"
+
+[assets]
+directory = "../widget"

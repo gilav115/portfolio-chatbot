@@ -15,6 +15,7 @@ SETUP_DIR="$ROOT/setup"
 export CONFIG_FILE="$SETUP_DIR/config.json"
 WORKER_DIR="$ROOT/worker"
 EXAMPLES_DIR="$SETUP_DIR/examples"
+PROFILE_DIR="$SETUP_DIR/profile"
 
 ok()   { echo "  ok       $*"; }
 info() { echo "  info     $*"; }
@@ -90,15 +91,9 @@ confirm() {
 
 
 echo ""
-echo "portfolio-chatbot: setup wizard"
-echo "================================"
+echo "portfolio-chatbot"
+echo "================="
 echo ""
-echo "  This wizard saves all your settings to setup/config.json."
-echo "  When finished, run  bash scripts/build-and-deploy.sh  to go live."
-echo ""
-echo "  Press Enter to keep the value shown in [brackets]."
-echo ""
-
 
 # Prerequisites
 if ! command -v python3 &>/dev/null; then
@@ -119,6 +114,24 @@ if [ ! -f "$CONFIG_FILE" ]; then
   info "Created setup/config.json from the example."
 fi
 
+echo "  What would you like to do?"
+echo ""
+echo "    1) Configure  — run the setup wizard"
+echo "    2) Deploy     — build and deploy to Cloudflare"
+echo ""
+printf "  Choice [1]: "
+IFS= read -r _MODE </dev/tty || _MODE=""
+[ -z "$_MODE" ] && _MODE="1"
+
+if [[ "$_MODE" == "2" ]]; then
+  exec bash "$ROOT/scripts/build-and-deploy.sh"
+fi
+
+echo ""
+echo "  This wizard saves all your settings to setup/config.json."
+echo "  Press Enter to keep the value shown in [brackets]."
+echo ""
+
 
 step "1 of 7   Identity"
 
@@ -132,6 +145,14 @@ echo ""
 echo "  Tone options: professional, casual, direct, warm, technical, formal, founder"
 ask "Tone" "tone" "professional"
 TONE="$_ANSWER"
+
+echo ""
+echo "  Response style options:"
+echo "    minimal     plain prose, max 2 sentences, no lists or formatting of any kind"
+echo "    prose       short flowing sentences, no lists"
+echo "    structured  numbered lists allowed for 3+ items, prose otherwise"
+ask "Response style" "responseStyle" "prose"
+RESPONSE_STYLE="$_ANSWER"
 
 
 step "2 of 7   Contact methods"
@@ -161,10 +182,11 @@ CONTACT_GITHUB="$_ANSWER"
 
 step "3 of 7   Security"
 
-echo "  Enter your website domains separated by commas."
-echo "  Include both www and non-www versions."
+echo "  Website URL(s) where the bot will be embedded (comma-separated)."
+echo "  Include both www and non-www if your site uses both."
 echo "  Example: https://example.com,https://www.example.com"
-echo "  Leave blank during local development. Set before publishing."
+echo "  The Cloudflare standalone page is added automatically - no need to list it here."
+echo "  Leave blank to allow requests from ANY origin (not recommended for production)."
 echo ""
 
 ask "Allowed origins" "security.allowedOrigins" ""
@@ -225,7 +247,7 @@ info "Checking Cloudflare authentication..."
 WHOAMI_OUTPUT="$(npx wrangler whoami 2>&1 || true)"
 
 CF_AUTHED=1
-if echo "$WHOAMI_OUTPUT" | grep -qi "not authenticated\|not logged in\|no config\|must be logged in\|error"; then
+if echo "$WHOAMI_OUTPUT" | grep -qi "not authenticated\|not logged in\|no config\|must be logged in"; then
   CF_AUTHED=0
   echo ""
   echo "  You are not logged in to Cloudflare."
@@ -239,6 +261,8 @@ else
   CF_EMAIL="$(echo "$WHOAMI_OUTPUT" | grep -oE "[a-zA-Z0-9._%+]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}" | head -1 || echo '')"
   ok "Authenticated as: ${CF_EMAIL:-your Cloudflare account}"
 fi
+
+WIDGET_TOKEN_VAL=""
 
 if [ "$CF_AUTHED" -eq 1 ]; then
   echo ""
@@ -278,27 +302,20 @@ if [ "$CF_AUTHED" -eq 1 ]; then
 
   if echo "$SECRET_LIST" | grep -q "WIDGET_TOKEN"; then
     ok "WIDGET_TOKEN is already set."
+    WIDGET_TOKEN_VAL="$(python3 -c "
+import json, os
+try:
+    with open(os.environ['CONFIG_FILE']) as f:
+        c = json.load(f)
+    print(c.get('deployment', {}).get('widgetToken', ''))
+except Exception:
+    print('')
+" 2>/dev/null || echo '')"
   else
-    SUGGESTED_TOKEN="$(python3 -c "import secrets, string; print(''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(24)))")"
-    echo ""
-    echo "  WIDGET_TOKEN is not set."
-    echo "  This is a secret string that blocks unauthorised use of your bot."
-    echo "  You will paste it into the script tag on your website."
-    echo ""
-    echo "  Suggested token: $SUGGESTED_TOKEN"
-    echo ""
-    if confirm "Store this token now?"; then
-      printf '%s' "$SUGGESTED_TOKEN" | npx wrangler secret put WIDGET_TOKEN 2>&1 | grep -v "^$" | sed 's/^/           /'
-      ok "WIDGET_TOKEN stored."
-      echo ""
-      echo "  Write this down, you will need it later:"
-      echo "  $SUGGESTED_TOKEN"
-    else
-      echo "  When ready, run:"
-      echo "    cd worker && npx wrangler secret put WIDGET_TOKEN"
-      echo "  Use any random string of 16 or more characters."
-    fi
-    echo ""
+    info "Generating WIDGET_TOKEN..."
+    WIDGET_TOKEN_VAL="$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")"
+    printf '%s' "$WIDGET_TOKEN_VAL" | npx wrangler secret put WIDGET_TOKEN 2>&1 | grep -v "^$" | sed 's/^/           /'
+    ok "WIDGET_TOKEN generated and stored."
   fi
 fi
 
@@ -308,11 +325,11 @@ fi
 echo ""
 info "Saving setup/config.json..."
 
-export BOT_NAME OWNER_NAME TONE
+export BOT_NAME OWNER_NAME TONE RESPONSE_STYLE
 export CONTACT_EMAIL CONTACT_LINKEDIN CONTACT_WHATSAPP CONTACT_SMS CONTACT_CALENDAR CONTACT_GITHUB
 export ALLOWED_ORIGINS LLM_PROVIDER LLM_MODEL
 export UI_ACCENT UI_WELCOME
-export WORKER_URL_VAL WIDGET_URL_VAL
+export WORKER_URL_VAL WIDGET_URL_VAL WIDGET_TOKEN_VAL
 
 python3 - <<'PYEOF'
 import json, os
@@ -364,6 +381,7 @@ def sv_list(key_path, csv):
 sv('botName',                   os.environ['BOT_NAME'])
 sv('ownerName',                 os.environ['OWNER_NAME'])
 sv('tone',                      os.environ['TONE'])
+sv('responseStyle',             os.environ['RESPONSE_STYLE'])
 sv('contactMethods.email',      os.environ['CONTACT_EMAIL'])
 sv('contactMethods.linkedin',   os.environ['CONTACT_LINKEDIN'])
 sv('contactMethods.whatsapp',   os.environ['CONTACT_WHATSAPP'])
@@ -377,6 +395,7 @@ sv('ui.accentColor',            os.environ['UI_ACCENT'])
 sv('ui.welcomeMessage',         os.environ['UI_WELCOME'])
 sv('deployment.workerUrl',      os.environ['WORKER_URL_VAL'])
 sv('deployment.widgetUrl',      os.environ['WIDGET_URL_VAL'])
+sv('deployment.widgetToken',    os.environ['WIDGET_TOKEN_VAL'])
 
 with open(config_file, 'w') as f:
     json.dump(c, f, indent=2)
@@ -385,15 +404,16 @@ PYEOF
 
 ok "setup/config.json saved."
 
-# Copy any missing profile .md files from examples now, so they exist to edit
+# Copy any missing profile .md files from examples into setup/profile/
+mkdir -p "$PROFILE_DIR"
 COPIED_PROFILES=0
 for EXAMPLE in "$EXAMPLES_DIR"/*.md; do
   [ -f "$EXAMPLE" ] || continue
   BASENAME="$(basename "$EXAMPLE")"
-  TARGET="$SETUP_DIR/$BASENAME"
+  TARGET="$PROFILE_DIR/$BASENAME"
   if [ ! -f "$TARGET" ]; then
     cp "$EXAMPLE" "$TARGET"
-    info "Created setup/$BASENAME from the example template."
+    info "Created setup/profile/$BASENAME from the example template."
     COPIED_PROFILES=1
   fi
 done
@@ -404,18 +424,18 @@ echo "Setup complete."
 echo ""
 
 if [ "$COPIED_PROFILES" -eq 1 ]; then
-  echo "  Profile templates were created in setup/."
+  echo "  Profile templates were created in setup/profile/."
   echo "  Replace the example text with your real information before deploying."
 else
-  echo "  Profile files already exist in setup/."
+  echo "  Profile files already exist in setup/profile/."
 fi
 echo ""
 echo "  Files to edit:"
 for FILE in about.md contact.md services.md experience.md faq.md boundaries.md; do
-  [ -f "$SETUP_DIR/$FILE" ] && echo "    * setup/$FILE"
+  [ -f "$PROFILE_DIR/$FILE" ] && echo "    * setup/profile/$FILE"
 done
 echo ""
-echo "  At minimum, fill in setup/about.md and setup/contact.md."
+echo "  At minimum, fill in setup/profile/about.md and setup/profile/contact.md."
 echo ""
 echo "  For advanced settings (blockedTopics, suggestedQuestions, etc.):"
 echo "    edit setup/config.json directly."
@@ -423,12 +443,12 @@ echo ""
 
 if [ "$CF_AUTHED" -eq 1 ]; then
   echo "  When your profile files are ready, deploy with:"
-  echo "    bash scripts/build-and-deploy.sh"
+  echo "    bash scripts/setup.sh  (choose option 2)"
   echo ""
   if confirm "Deploy now?"; then
     bash "$ROOT/scripts/build-and-deploy.sh"
   fi
 else
-  echo "  When authenticated and profile files are ready, deploy with:"
-  echo "    bash scripts/build-and-deploy.sh"
+  echo "  Once authenticated, deploy with:"
+  echo "    bash scripts/setup.sh  (choose option 2)"
 fi
