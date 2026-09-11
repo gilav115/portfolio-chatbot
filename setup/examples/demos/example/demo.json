@@ -1,15 +1,12 @@
 {
   "_readme": "Copy this folder to setup/demos/<word>/ where <word> is the private path (squarenumbers.co.uk/preview/<word>). Fill in every field, add knowledge/*.md files and an optional logo.png, then run: node scripts/demo-build.js. Generate a password with: node scripts/demo-build.js --password",
-
   "business": {
     "name": "Example Bakery",
     "type": "an independent bakery and café in Cambridge",
     "website": "https://example.com",
     "ownerName": "Sam Example"
   },
-
   "password": "replace-with-generated-password-12",
-
   "bot": {
     "name": "Example Bakery assistant",
     "tone": "warm",
@@ -25,7 +22,6 @@
     ],
     "fallback": "I can't help with that one here, but the Example Bakery team can: their details are in the buttons below."
   },
-
   "branding": {
     "accent": "#111111",
     "background": "#F7F6F3",
@@ -35,13 +31,37 @@
     "fontStack": "Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif",
     "wordmark": "example"
   },
-
   "links": [
-    { "label": "Order online", "href": "https://example.com/order", "type": "order", "keywords": ["order online", "click and collect", "click & collect", "pre-order"] },
-    { "label": "Instagram", "href": "https://instagram.com/example", "type": "instagram", "keywords": ["instagram"] },
-    { "label": "Call the café", "href": "tel:+441223000000", "type": "phone", "keywords": ["phone", "call", "ring"] }
+    {
+      "label": "Order online",
+      "href": "https://example.com/order",
+      "type": "order",
+      "keywords": [
+        "order online",
+        "click and collect",
+        "click & collect",
+        "pre-order"
+      ]
+    },
+    {
+      "label": "Instagram",
+      "href": "https://instagram.com/example",
+      "type": "instagram",
+      "keywords": [
+        "instagram"
+      ]
+    },
+    {
+      "label": "Call the café",
+      "href": "tel:+441223000000",
+      "type": "phone",
+      "keywords": [
+        "phone",
+        "call",
+        "ring"
+      ]
+    }
   ],
-
   "limits": {
     "maxMessages": 15,
     "maxMessageLength": 400,
@@ -49,16 +69,18 @@
     "dailyMessageCap": 300,
     "sessionHours": 2
   },
-
   "blockedTopics": [
-    "politics", "religion", "medical advice", "legal advice", "financial advice",
-    "other businesses or competitors", "staff personal details"
+    "politics",
+    "religion",
+    "medical advice",
+    "legal advice",
+    "financial advice",
+    "other businesses or competitors",
+    "staff personal details"
   ],
-
   "demo": {
-    "builtBy": "Square Numbers",
-    "builderName": "Gil Avraham",
-    "builderSite": "https://squarenumbers.co.uk",
+    "builtBy": "SquareNumbers",
+    "builderSite": "squarenumbers.co.uk",
     "realVersionCapabilities": [
       "Live on the business's own website, on every page, in its own look",
       "Answers from the real menu, hours and policies, which the team can update without a developer",
@@ -66,7 +88,6 @@
       "Reports what customers asked most, so the website and FAQs can improve"
     ]
   },
-
   "llm": {
     "model": null
   }

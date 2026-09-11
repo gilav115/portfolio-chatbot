@@ -20,7 +20,7 @@ async function makeBundle() {
         { label: 'Cakes', href: 'https://cakes.example', type: 'cake', keywords: ['birthday cake', 'cakes'] },
       ],
       limits: { maxMessages: 3, maxMessageLength: 120, rateLimitRpm: 100, dailyMessageCap: 1000, sessionHours: 1 },
-      demo: { builtBy: 'Square Numbers', builderName: 'Gil', realVersionCapabilities: ['Cap one'] },
+      demo: { builtBy: 'SquareNumbers', builderSite: 'squarenumbers.co.uk', realVersionCapabilities: ['Cap one'] },
       passwordSalt: salt,
       passwordHash: await hashPassword(PASSWORD, salt),
       knowledge: '## menu\n\nFlat White £4.25.',
@@ -303,7 +303,7 @@ describe('demo prompt', () => {
     const p = buildDemoPrompt(demo, { used: 13, max: 15 })
     expect(p).toContain('customer assistant for Stir')
     expect(p).toContain('THIS IS A DEMO')
-    expect(p).toContain('Square Numbers (Gil)')
+    expect(p).toContain('SquareNumbers')
     expect(p).toContain('Matt Harrison')
     expect(p).toContain('[SAMPLE]')
     expect(p).toContain('- Cap one')
