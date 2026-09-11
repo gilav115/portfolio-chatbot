@@ -55,10 +55,23 @@ function buildOne(dir, slug) {
   const kDir = path.join(dir, 'knowledge');
   let knowledge = '';
   let files = 0;
+  const sampleTopics = [];
   if (fs.existsSync(kDir)) {
     for (const f of fs.readdirSync(kDir).filter(n => n.endsWith('.md')).sort()) {
-      const body = fs.readFileSync(path.join(kDir, f), 'utf8').trim();
+      let body = fs.readFileSync(path.join(kDir, f), 'utf8').trim();
       if (!body) continue;
+      // Sample lines: "[SAMPLE: dogs, dog] Dogs: well behaved dogs are welcome".
+      // The words after the colon are the topic keywords; if none are given,
+      // the "Topic:" label at the start of the line is used. The worker uses
+      // them to add an "example information" note whenever a reply touches
+      // the topic, whether or not the model remembered to say so itself.
+      body = body.replace(/\[SAMPLE(?::([^\]]*))?\]\s*([^:\n]{1,60}:)?/g, (m, kws, topic) => {
+        const label    = (topic ?? '').replace(/:$/, '').trim() || 'this';
+        const keywords = (kws ? kws.split(',') : [label])
+          .map(w => w.trim().toLowerCase()).filter(Boolean);
+        if (keywords.length) sampleTopics.push({ label: label.toLowerCase(), keywords });
+        return `[SAMPLE: example only, not confirmed by ${cfg.business.name}; tell the visitor this is example information] ${topic ?? ''}`;
+      });
       knowledge += `\n\n## ${f.replace(/^\d+[-_]?/, '').replace(/\.md$/, '')}\n\n${body}`;
       files += 1;
     }
@@ -80,7 +93,7 @@ function buildOne(dir, slug) {
   const salt = crypto.randomBytes(16).toString('hex');
   const { password, ...rest } = cfg;
 
-  ok(`${slug}: ${files} knowledge file(s), ${knowledge.length} characters${logoDataUri ? ', logo embedded' : ', no logo'}.`);
+  ok(`${slug}: ${files} knowledge file(s), ${knowledge.length} characters, ${sampleTopics.length} sample topic(s)${logoDataUri ? ', logo embedded' : ', no logo'}.`);
 
   return {
     ...rest,
@@ -88,6 +101,7 @@ function buildOne(dir, slug) {
     passwordSalt: salt,
     passwordHash: hashPassword(password, salt),
     knowledge:    knowledge.trim(),
+    sampleTopics,
     logoDataUri,
   };
 }

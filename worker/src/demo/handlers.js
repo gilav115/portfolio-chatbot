@@ -174,9 +174,13 @@ async function handleDemoChat(request, env, demo, ip, callModel, respond) {
 
   let text;
   try {
+    // Token budget is generous on purpose: menu and hours answers are lists,
+    // and a cut-off sentence looks worse than a slightly long one. The word
+    // limit in the prompt keeps ordinary answers short.
     text = await callModel(systemPrompt, trimmed, message, env, {
       maxAnswerWords: demo.bot?.maxAnswerWords ?? 90,
-      llm: demo.llm ?? {},
+      maxTokens:      demo.bot?.maxTokens ?? 450,
+      llm:            demo.llm ?? {},
     });
   } catch (err) {
     console.error(`[demo:${demo.slug}] model call failed:`, err);
@@ -185,8 +189,9 @@ async function handleDemoChat(request, env, demo, ip, callModel, respond) {
 
   const fallback = demo.bot?.fallback
     ?? `I can't help with that one here, but the ${name} team can: their details are in the buttons below.`;
-  const reply = guardOutput(text, name, fallback);
-  const cta   = matchLinks(demo.links ?? [], message, reply);
+  let reply = guardOutput(text, name, fallback);
+  reply = flagSampleUse(reply, message, demo.sampleTopics ?? [], name);
+  const cta = matchLinks(demo.links ?? [], message, reply);
 
   return respond({ reply, usage, ...(cta.length && { cta }) }, 200);
 }
@@ -199,22 +204,45 @@ export function usageFor(history, demo) {
   return { used: priorUserMessages + 1, max: demo.limits.maxMessages };
 }
 
-// Picks the links whose keywords appear in the visitor's message or the reply.
-// Keywords are whole-word, case-insensitive. At most three buttons per reply.
+// Picks the links to show under a reply. A link matches when one of its
+// `keywords` appears in the visitor's message, or one of its `replyKeywords`
+// (default: the label itself) appears in the reply. The reply side is kept
+// narrow on purpose: a reply that merely says "delivery" should not summon
+// the Deliveroo button. Whole-word, case-insensitive, at most three.
 export function matchLinks(links, message, reply) {
-  const haystack = `${message}\n${reply}`.toLowerCase();
+  const msg = String(message ?? '').toLowerCase();
+  const rep = String(reply ?? '').toLowerCase();
   const out = [];
   for (const link of links) {
-    if (!link?.label || !link?.href || !Array.isArray(link.keywords)) continue;
-    const hit = link.keywords.some(kw => {
-      const k = String(kw).toLowerCase().trim();
-      if (!k) return false;
-      return new RegExp(`(^|[^a-z0-9])${escapeRegex(k)}([^a-z0-9]|$)`, 'i').test(haystack);
-    });
+    if (!link?.label || !link?.href) continue;
+    const msgKeys = Array.isArray(link.keywords) ? link.keywords : [];
+    const repKeys = Array.isArray(link.replyKeywords) ? link.replyKeywords : [link.label];
+    const hit = msgKeys.some(k => hasWord(msg, k)) || repKeys.some(k => hasWord(rep, k));
     if (hit) out.push({ label: link.label, href: link.href, type: link.type ?? 'link' });
     if (out.length === 3) break;
   }
   return out;
+}
+
+// Appends the "example information" note when the exchange touches a topic
+// whose knowledge is marked [SAMPLE], unless the reply already says so. The
+// prompt asks the model to add this itself; this makes it certain.
+const SAMPLE_NOTE_PATTERN = /example (information|answer|data|details)|not (yet )?confirmed by|placeholder/i;
+
+// sampleTopics: [{ label: 'dogs', keywords: ['dogs', 'dog', 'puppy'] }, ...]
+export function flagSampleUse(reply, message, sampleTopics, name) {
+  if (!Array.isArray(sampleTopics) || !sampleTopics.length) return reply;
+  if (SAMPLE_NOTE_PATTERN.test(reply)) return reply;
+  const text = `${message}\n${reply}`.toLowerCase();
+  const hit  = sampleTopics.find(t => Array.isArray(t?.keywords) && t.keywords.some(k => hasWord(text, k)));
+  if (!hit) return reply;
+  return `${reply.trim()}\n\nOne thing to flag: what I said about ${hit.label} is example information for this preview, not confirmed by ${name} yet. The real version would use ${name}'s own answer.`;
+}
+
+function hasWord(text, keyword) {
+  const k = String(keyword ?? '').toLowerCase().trim();
+  if (!k) return false;
+  return new RegExp(`(^|[^a-z0-9])${escapeRegex(k)}([^a-z0-9]|$)`, 'i').test(text);
 }
 
 function escapeRegex(s) {

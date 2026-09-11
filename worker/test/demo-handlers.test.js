@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { handleDemoRequest, matchLinks, usageFor, _resetDailyStore } from '../src/demo/handlers.js'
+import { handleDemoRequest, matchLinks, usageFor, flagSampleUse, _resetDailyStore } from '../src/demo/handlers.js'
 import { hashPassword, issueToken, _resetAttemptStore } from '../src/demo/auth.js'
 import { buildDemoPrompt } from '../src/demo/prompt.js'
 import { getDemo, publicConfig, guardConfigFor, isValidSlug } from '../src/demo/registry.js'
@@ -264,6 +264,16 @@ describe('helpers', () => {
     expect(matchLinks(links, 'a cake?', '')).toHaveLength(1)
     expect(matchLinks(links, 'cake, deliveroo, gift card, job', '')).toHaveLength(3)
     expect(matchLinks([{ label: 'x', href: 'x', keywords: ['a.b'] }], 'axb', '')).toEqual([])
+  })
+
+  it('flagSampleUse appends the note only for sample topics, and never twice', () => {
+    const topics = [{ label: 'dogs', keywords: ['dogs', 'dog'] }, { label: 'wifi', keywords: ['wifi'] }]
+    const flagged = flagSampleUse('Dogs are welcome.', 'Can I bring my dog?', topics, 'Stir')
+    expect(flagged).toMatch(/what I said about dogs is example information/)
+    expect(flagSampleUse('A flat white is £4.25.', 'Price of a flat white?', topics, 'Stir')).toBe('A flat white is £4.25.')
+    const already = 'Dogs are welcome. That is example information for this preview.'
+    expect(flagSampleUse(already, 'dog?', topics, 'Stir')).toBe(already)
+    expect(flagSampleUse('Hotdogs are not on the menu.', 'hotdogs?', topics, 'Stir')).toBe('Hotdogs are not on the menu.')
   })
 
   it('usageFor counts only user turns', () => {

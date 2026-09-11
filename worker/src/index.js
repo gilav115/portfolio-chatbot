@@ -354,7 +354,7 @@ function mockLLM(systemPrompt, history, message) {
 // Default model: gpt-4o-mini (cheap, fast, good quality for this use case).
 // Override via llm.model in bot.config.json (e.g. "gpt-4o", "gpt-4-turbo").
 async function callOpenAI(systemPrompt, history, message, env, config) {
-  const maxTokens = Math.ceil((config.maxAnswerWords ?? 80) * 1.5) + 50;
+  const maxTokens = config.maxTokens ?? Math.ceil((config.maxAnswerWords ?? 80) * 1.5) + 50;
   const model     = config.llm?.model ?? 'gpt-4o-mini';
   const messages  = [
     { role: 'system', content: systemPrompt },
@@ -395,7 +395,7 @@ async function callOpenAI(systemPrompt, history, message, env, config) {
 // Override via llm.model in bot.config.json (e.g. "claude-sonnet-4-6").
 // Note: Anthropic uses a separate 'system' field instead of a system message in the array.
 async function callAnthropic(systemPrompt, history, message, env, config) {
-  const maxTokens = Math.ceil((config.maxAnswerWords ?? 80) * 1.5) + 50;
+  const maxTokens = config.maxTokens ?? Math.ceil((config.maxAnswerWords ?? 80) * 1.5) + 50;
   const model     = config.llm?.model ?? 'claude-haiku-4-5-20251001';
   const messages  = [...history, { role: 'user', content: message }];
 

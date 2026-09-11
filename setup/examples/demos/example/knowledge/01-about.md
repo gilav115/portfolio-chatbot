@@ -14,5 +14,5 @@ Phone 01223 000000. Email hello@example.com.
 
 Lines marked [SAMPLE] are placeholders for the preview. The bot says so when it uses one.
 
-[SAMPLE] Dogs are welcome in the café and on the terrace.
-[SAMPLE] There is free wifi; ask at the counter for the password.
+[SAMPLE: dogs, dog] Dogs: dogs are welcome in the café and on the terrace.
+[SAMPLE: wifi, wi-fi] Wifi: there is free wifi; ask at the counter for the password.
