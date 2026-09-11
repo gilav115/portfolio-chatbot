@@ -27,3 +27,11 @@ setup/embed.html
 knowledge/
 profile/
 config/
+
+# ── Private business demos — never commit (this repository is public) ────────
+setup/demos/
+worker/src/demo/bundle.generated.js
+worker/.dev.vars
+
+# Re-include the tracked demo template (the legacy knowledge/ rule above would hide it).
+!setup/examples/demos/**/knowledge/

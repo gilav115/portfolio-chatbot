@@ -293,6 +293,11 @@
   toggleBtn.addEventListener('click', () => isOpen ? closePanel() : openPanel());
   closeBtn.addEventListener('click', closePanel);
 
+  // Lets the host page open the chat from its own links/buttons, e.g.
+  // <a data-open-chat href="#">Ask</a> dispatching this event on click.
+  // Useful for "not sure if this is covered? ask" prompts placed elsewhere on the page.
+  window.addEventListener('portfolio-chatbot:open', () => { if (!isOpen) openPanel(); });
+
   shadow.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && isOpen) { e.preventDefault(); closePanel(); }
   });

@@ -305,6 +305,12 @@ cd worker && npm run dev
 When running locally, the widget token and origin checks are skipped if the secrets are not set: so you can test freely without configuring them.
 
 
+## Private business demos (optional)
+
+The worker can also host password-protected demo assistants for other businesses, one folder each under `setup/demos/<word>/` (gitignored). Each folder holds a `demo.json` (name, colours, password, links, limits), a `knowledge/` folder of markdown facts, and an optional `logo.png`. `scripts/demo-build.js` bundles them into the worker at deploy time, replacing each password with a salted hash. A visitor opens `/preview/<word>` on your website, enters the password, and receives a signed two-hour session token; only then does the browser get the branding, and only with that token will `/demo/<word>/chat` answer. Start from `setup/examples/demos/example/`.
+
+Routes: `POST /demo/<word>/auth`, `GET /demo/<word>/config`, `POST /demo/<word>/chat`. Secret: `DEMO_SESSION_SECRET` (created by the deploy script). Local: put `DEMO_SESSION_SECRET=...` and either `LLM_MOCK=1` or `LLM_API_KEY=...` in `worker/.dev.vars`.
+
 ## Security model
 
 * All secrets are encrypted Cloudflare Worker secrets: never in source code or git history

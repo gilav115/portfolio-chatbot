@@ -244,6 +244,18 @@ if [ "$MISSING_SECRETS" -eq 1 ]; then
   fail "Set the missing secrets above, then run this script again."
 fi
 
+# DEMO_SESSION_SECRET signs the session tokens for the private demo pages
+# (see worker/src/demo/auth.js). Nobody needs to know its value, so it is
+# generated once here and never written anywhere else.
+if echo "$SECRET_LIST" | grep -q "DEMO_SESSION_SECRET"; then
+  ok "DEMO_SESSION_SECRET is set."
+else
+  info "Generating DEMO_SESSION_SECRET for the demo password gate..."
+  DEMO_SECRET="$(python3 -c "import secrets; print(secrets.token_urlsafe(48))")"
+  printf '%s' "$DEMO_SECRET" | "$WRANGLER" secret put DEMO_SESSION_SECRET 2>&1 | grep -v "^$" | sed 's/^/           /'
+  ok "DEMO_SESSION_SECRET set."
+fi
+
 
 # ════════════════════════════════════════════════════════════════════════════
 step "5 of 7   Uploading profile and config"
@@ -289,6 +301,14 @@ fi
 # ════════════════════════════════════════════════════════════════════════════
 step "6 of 7   Deploying chat worker"
 # ════════════════════════════════════════════════════════════════════════════
+
+# Bundle the private business demos (setup/demos/) into the worker source.
+# The generated file is gitignored; without this step the deploy would fail
+# on the missing import.
+info "Bundling business demos from setup/demos/..."
+if ! node "$ROOT/scripts/demo-build.js"; then
+  fail "Demo bundle failed. Fix the demo folder reported above and run this script again."
+fi
 
 info "Running wrangler deploy..."
 DEPLOY_OUTPUT="$("$WRANGLER" deploy 2>&1)"
