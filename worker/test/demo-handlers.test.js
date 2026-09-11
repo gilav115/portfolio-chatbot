@@ -230,6 +230,17 @@ describe('chat', () => {
     expect(JSON.stringify(res.body)).not.toContain('secret details')
   })
 
+  it('caps messages per session server-side even when history is faked empty', async () => {
+    const d = deps(bundle)
+    // maxMessages is 3; three restarts of headroom = 9 calls, the tenth is refused.
+    for (let i = 0; i < 9; i++) {
+      expect((await chat(d, { message: 'again', history: [] })).status).toBe(200)
+    }
+    const res = await chat(d, { message: 'again', history: [] })
+    expect(res.status).toBe(401)
+    expect(res.body.error).toMatch(/used its messages/)
+  })
+
   it('enforces the per-demo daily cap', async () => {
     bundle.lantern.limits.dailyMessageCap = 2
     const d = deps(bundle)

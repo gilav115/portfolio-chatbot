@@ -55,7 +55,8 @@ describe('session tokens', () => {
     const { token, expiresAt } = await issueToken('lantern', SECRET, 1000, 5000)
     expect(expiresAt).toBe(6000)
     const res = await verifyToken(token, 'lantern', SECRET, 5500)
-    expect(res).toEqual({ ok: true, expiresAt: 6000 })
+    expect(res).toMatchObject({ ok: true, expiresAt: 6000 })
+    expect(res.nonce).toMatch(/^[A-Za-z0-9_-]{16}$/)
   })
 
   it('rejects an expired token', async () => {

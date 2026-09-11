@@ -39,7 +39,24 @@ export function guardDailyCap(slug, cap, now = Date.now()) {
   return null;
 }
 
-export function _resetDailyStore() { dailyStore.clear(); }
+export function _resetDailyStore() { dailyStore.clear(); sessionStore.clear(); }
+
+// Per-session message counter keyed by the token's nonce, so the conversation
+// limit holds even if a caller sends an empty history every time. In memory
+// per isolate, like the other counters; the token expiry bounds its lifetime.
+// Allows a little headroom over maxMessages for "New conversation" restarts.
+const sessionStore = new Map();
+const SESSION_RESTARTS = 3;
+
+export function guardSessionCount(nonce, maxMessages) {
+  if (!nonce) return null;
+  const count = (sessionStore.get(nonce) ?? 0) + 1;
+  sessionStore.set(nonce, count);
+  if (count > maxMessages * SESSION_RESTARTS) {
+    return 'This preview session has used its messages. Enter the password again to start afresh.';
+  }
+  return null;
+}
 
 // deps: { bundle, callModel, respond } are injected so tests can run the
 // handlers without the generated bundle or a real model.
@@ -77,6 +94,8 @@ export async function handleDemoRequest(request, env, config, url, deps) {
   if (action === 'chat' && request.method === 'POST') {
     const session = await verifyToken(bearerToken(request), slug, secret);
     if (!session.ok) return respond({ error: sessionMessage(session.reason) }, 401);
+    const usedUp = guardSessionCount(session.nonce, demo.limits.maxMessages);
+    if (usedUp) return respond({ error: usedUp }, 401);
     return handleDemoChat(request, env, demo, ip, callModel, respond);
   }
 

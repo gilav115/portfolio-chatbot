@@ -135,12 +135,12 @@ export async function verifyToken(token, slug, secret, now = Date.now()) {
   const expected = await sign(payload, secret);
   if (!timingSafeEqual(expected, token.slice(dot + 1))) return { ok: false, reason: 'bad signature' };
 
-  const [tokenSlug, expiresRaw] = payload.split('|');
+  const [tokenSlug, expiresRaw, nonce] = payload.split('|');
   const expiresAt = Number(expiresRaw);
   if (tokenSlug !== slug) return { ok: false, reason: 'wrong demo' };
   if (!Number.isFinite(expiresAt) || now >= expiresAt) return { ok: false, reason: 'expired' };
 
-  return { ok: true, expiresAt };
+  return { ok: true, expiresAt, nonce: nonce ?? '' };
 }
 
 // Reads "Authorization: Bearer <token>" and returns the token or ''.
