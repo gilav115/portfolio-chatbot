@@ -46,15 +46,24 @@ describe('buildSystemPrompt', () => {
     expect(p).toMatch(/politics/)
   })
 
-  it('uses "any topic covered" text when allowedTopics is empty', () => {
-    expect(buildSystemPrompt({ ...base, allowedTopics: [] }, 'profile'))
-      .toMatch(/any topic covered/i)
+  it('describes scope around the owner instead of listing keywords', () => {
+    const p = buildSystemPrompt({ ...base, ownerName: 'Alice' }, 'profile')
+    expect(p).toMatch(/SCOPE/)
+    expect(p).toMatch(/visitors describing their own software quality/i)
   })
 
-  it('lists each allowed topic when provided', () => {
-    const p = buildSystemPrompt({ ...base, allowedTopics: ['software', 'AI'] }, 'profile')
-    expect(p).toMatch(/software/)
-    expect(p).toMatch(/AI/)
+  it('instructs the model to bridge rather than refuse near-miss questions', () => {
+    const p = buildSystemPrompt(base, 'profile')
+    expect(p).toMatch(/BRIDGE, do not refuse/)
+    expect(p).toMatch(/Never claim experience with a tool the profile does not mention/)
+  })
+
+  it('enforces British English', () => {
+    expect(buildSystemPrompt(base, 'profile')).toMatch(/British English/)
+  })
+
+  it('tells the model to close problem conversations with the intro call', () => {
+    expect(buildSystemPrompt(base, 'profile')).toMatch(/30 minute introductory call/)
   })
 
   it('mentions contact buttons for each configured contact method', () => {

@@ -12,8 +12,14 @@ compatibility_date = "2024-01-01"
 #   cd worker && npx wrangler secret put WIDGET_TOKEN
 #
 # The build script (scripts/build-and-deploy.sh) sets these automatically:
-#   BOT_CONFIG_JSON  — contents of setup/config.json
-#   PROFILE_TEXT     — concatenated contents of setup/*.md
+#   BOT_CONFIG_JSON      — contents of setup/config.json
+#   PROFILE_TEXT         — concatenated contents of setup/*.md
+#   DEMO_SESSION_SECRET  — random key that signs demo session tokens (generated once)
+#
+# Local development (worker/.dev.vars, gitignored):
+#   DEMO_SESSION_SECRET=any-long-string
+#   LLM_MOCK=1            — answer with a stand-in instead of calling the model
+#   LLM_API_KEY=sk-...    — or the real key, to test real answers locally
 #
 # All secrets are encrypted at rest in Cloudflare. They are never in source code.
 

@@ -233,20 +233,19 @@ describe('guardTopic', () => {
     expect(guardTopic(msg, { blockedTopics: ['politics'] })).toBeTruthy()
   })
 
-  it('returns null when allowedTopics matches', () => {
-    const msg = 'Can you tell me about your software engineering services?'
+  it('lets a lead message through even when it matches no service keyword (regression: 2026-07 audit)', () => {
+    const msg = 'Our deploys keep breaking and we lose money every week. Can you help us?'
+    expect(guardTopic(msg, { blockedTopics: ['politics', 'personal life'] })).toBeNull()
+  })
+
+  it('lets a competitor-tool question through to the LLM (regression: 2026-07 audit)', () => {
+    const msg = 'Can you help us reduce our flaky Cypress tests? We are a healthtech startup'
+    expect(guardTopic(msg, { blockedTopics: ['politics'] })).toBeNull()
+  })
+
+  it('ignores allowedTopics entirely: no allowlist gate exists any more', () => {
+    const msg = 'Tell me anything at all about whatever subject you like today'
     expect(guardTopic(msg, { allowedTopics: ['software'], blockedTopics: [] })).toBeNull()
-  })
-
-  it('returns error when allowedTopics is set and message does not match any', () => {
-    const msg = 'Can you tell me all about the history of ancient Rome?'
-    expect(guardTopic(msg, { allowedTopics: ['software', 'engineering'], blockedTopics: [] }))
-      .toBeTruthy()
-  })
-
-  it('returns null when allowedTopics is empty (allows anything not blocked)', () => {
-    const msg = 'Can you tell me all about the history of ancient Rome?'
-    expect(guardTopic(msg, { allowedTopics: [], blockedTopics: [] })).toBeNull()
   })
 })
 

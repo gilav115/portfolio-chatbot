@@ -10,19 +10,56 @@
  * so expensive checks (injection regex, LLM call) are skipped on bad requests.
  */
 
+// Each pattern is a phrase people actually type when trying to override or
+// extract the prompt. They are deliberately specific: a customer asking "can
+// you ignore the onions" or "what are your opening rules" must never match.
 const INJECTION_PATTERNS = [
-  /ignore (previous|above|all) instructions/i,
-  /you are now/i,
-  /forget (everything|all|your instructions)/i,
-  /\bsystem prompt\b/i,
-  /reveal (your|the) (prompt|instructions|rules|context|knowledge)/i,
-  /act as (a different|an unrestricted|a new)/i,
-  /\bjailbreak\b/i,
-  /pretend (you are|to be)/i,
-  /override (your|the) (rules|instructions)/i,
-  /disregard (your|the|previous)/i,
-  /what (are|were) your instructions/i,
+  // Overriding the rules
+  /\bignore (the |all |any |your )?(previous|above|prior|earlier|all|these|your|my) (instructions|rules|prompts?|guidelines|directions)\b/i,
+  /\b(forget|disregard|discard|bypass|override|overrule) (everything|all( of)? (your|the|previous|prior|above)|(the |your |all |any |previous |prior |above |earlier |system |hidden |original )+(instructions|rules|prompts?|guidelines|context|training|programming))\b/i,
+  /\byou are now (a|an|the|my|in|going)\b/i,
+  /\bfrom now on,? (you|act|behave|respond|pretend|ignore|answer)\b/i,
+  /\byour (instructions|rules|prompt) (are|is) (now|cancelled|void|overridden|replaced)\b/i,
+  /\b(new|updated|revised|real|true) (instructions|persona|identity|system prompt)\b/i,
+  // Extracting the prompt
+  /\b(system|developer|hidden|secret|initial|original|internal) (prompt|instructions?|message|directives?)\b/i,
+  /\b(reveal|show|print|display|output|repeat|recite|dump|leak|paste|tell me|give me|send me|what (is|was)) (me )?(your|the|its)( (full|complete|entire|exact|hidden|secret|system|initial|original|above|previous))? ?(prompt|instructions?|context window|knowledge base|configuration|config|directives?|training data)\b/i,
+  /\bwhat (are|were) your (instructions|directives|guidelines)\b/i,
+  /\b(repeat|print|output|echo) (the|all|everything)( (text|words|content))? (above|before|prior)\b/i,
+  /\b(translate|encode|write|output|repeat) (your|the) (instructions|prompt) (in|into|as|to)\b/i,
+  /\bbase64\b.*\b(prompt|instructions)\b|\b(prompt|instructions)\b.*\bbase64\b/i,
+  // Changing identity
+  /\bact as (a different|an unrestricted|a new|an? (unfiltered|uncensored|evil|jailbroken))\b/i,
+  /\b(jailbreak|jailbroken|do anything now|developer mode|god mode|unrestricted mode|no restrictions mode)\b/i,
+  /\bpretend (that )?(you are|you're|to be|you have no)\b/i,
+  /\b(roleplay|role-play|role play) as\b/i,
+  /\b(admin|administrator|root|sudo|maintenance|debug) (mode|access|override)\b/i,
+  /\b(this is|i am|i'm) (your|the) (developer|creator|admin|administrator|programmer|engineer who built you)\b/i,
 ];
+
+// Text that should never appear in a reply. If the model quotes its own
+// instructions, these headings are what would leak; the output guard swaps the
+// reply for a fallback instead.
+const LEAK_MARKERS = [
+  /\bSAFETY RULES\b/i, /\bTHIS IS A DEMO\b/i, /\bFACTS AND HONESTY\b/i, /\bSESSION STATUS\b/i,
+  /\bWHAT YOU KNOW ABOUT\b/i, /\bBLOCKED TOPICS\b/i, /\bCONTACT METHODS AVAILABLE\b/i,
+  /\bRULES: follow these\b/i, /\bPASSING ON A MESSAGE\b/i, /\bREAL VERSION \(/i,
+  /\bKNOWLEDGE \(your only source\b/i, /\bLINKS AVAILABLE AS BUTTONS\b/i,
+  /\bsystem prompt\b/i, /\bmy instructions (say|state|tell)\b/i,
+];
+
+// Removes control characters and invisible Unicode that are sometimes used to
+// hide instructions from pattern checks, and collapses runs of whitespace.
+// Non-strings are returned unchanged so the size guard can reject them.
+export function normaliseMessage(message) {
+  if (typeof message !== 'string') return message;
+  return message
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '')
+    .replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF]/g, '')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
 
 // In-memory rate limit store (per-isolate lifetime: see wrangler.toml note)
 const rateLimitStore = new Map();
@@ -124,13 +161,15 @@ export function guardInjection(message) {
   return null;
 }
 
-// Pre-filters messages against blockedTopics and allowedTopics keyword lists.
-// Short messages (< 30 chars) are always allowed: they are likely greetings or follow-ups
-// that lack enough words to reliably classify. The LLM system prompt enforces topic
-// boundaries as a second, more nuanced layer for messages that pass this check.
+// Pre-filters messages against the blockedTopics phrase list only.
+// There is deliberately no allowlist gate here: visitors describe real problems in
+// their own words ("our deploys keep breaking"), and a keyword allowlist rejects
+// exactly those high-intent messages. Topic scope is enforced by the system prompt,
+// which can judge intent rather than match substrings.
+// Short messages (< 30 chars) are always allowed: they are likely greetings or follow-ups.
 export function guardTopic(message, config) {
   if (message.length < 30) return null;
-  const { allowedTopics = [], blockedTopics = [], ownerName = 'the professional' } = config;
+  const { blockedTopics = [], ownerName = 'the professional' } = config;
   const lower = message.toLowerCase();
 
   const isBlocked = blockedTopics.some(t => lower.includes(t.toLowerCase()));
@@ -138,25 +177,25 @@ export function guardTopic(message, config) {
     return `I can only answer questions about ${ownerName} and their work.`;
   }
 
-  if (allowedTopics.length) {
-    const isOnTopic = allowedTopics.some(t => lower.includes(t.toLowerCase()));
-    if (!isOnTopic) {
-      console.info('[guard:topic] Off-topic blocked at pre-filter');
-      return `I can only answer questions about ${ownerName} and their work.`;
-    }
-  }
-
   return null;
 }
 
 // Sanitises and caps the LLM reply before sending it to the visitor.
 // Trims at a sentence boundary (. ! ?) to avoid mid-sentence cuts.
-// Returns a safe fallback string if the reply is missing or empty.
+// Returns a safe fallback string if the reply is missing, empty, or looks like
+// it is quoting the instructions (see LEAK_MARKERS). customFallback overrides
+// the default wording, which is written for Gil Bot's contact buttons.
 // Hard cap: 1500 characters: well above the maxAnswerWords limit in practice.
-export function guardOutput(reply, ownerName) {
-  const fallback = `I can't answer that from the approved information. You can contact ${ownerName ?? 'me'} directly using the contact buttons below.`;
+export function guardOutput(reply, ownerName, customFallback) {
+  const fallback = customFallback
+    ?? `That's not something I can help with here, but you can reach ${ownerName ?? 'me'} directly using the contact buttons below.`;
 
   if (typeof reply !== 'string' || reply.trim().length === 0) return fallback;
+
+  if (LEAK_MARKERS.some(p => p.test(reply))) {
+    console.warn('[guard:output] Reply looked like quoted instructions: replaced with fallback.');
+    return fallback;
+  }
 
   const MAX_CHARS = 1500;
   if (reply.length <= MAX_CHARS) return reply.trim();
