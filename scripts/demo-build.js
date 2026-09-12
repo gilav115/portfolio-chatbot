@@ -10,7 +10,7 @@
  *   knowledge/*.md     facts the bot may use, joined in filename order
  *   logo.png|svg|webp  optional, embedded as a data URI (sent only after login)
  *
- * The password in demo.json is replaced in the bundle by a salted SHA-256
+ * The password in demo.json is replaced in the bundle by a salted PBKDF2
  * hash, so the worker never holds the plain password. The bundle file is
  * gitignored: this repository is public and demo content is private.
  */
@@ -134,30 +134,26 @@ function main() {
   if (!count) warn('no demos in setup/demos/. Copy setup/examples/demos/example/ to start one.');
 }
 
-/* Five random words plus a two digit number, still easy to read down a phone.
-   The list is 120 words, so the keyspace is 120^5 x 90, about 41 bits. The
-   salted hash is baked into the deployed worker rather than served anywhere,
-   and the hash is PBKDF2 with 210,000 rounds, so an offline attack on a leaked
-   bundle is slow per guess as well. Four words from a 30 word list gave only
-   26 bits against a plain SHA-256, which would not have held. */
-const PASSWORD_WORDS = [
-  'oven', 'spoon', 'river', 'lantern', 'maple', 'pebble', 'harbour', 'copper', 'meadow', 'cedar',
-  'ember', 'orchard', 'saffron', 'willow', 'summit', 'velvet', 'marble', 'clover', 'north', 'ferry',
-  'poppy', 'quartz', 'timber', 'garnet', 'linen', 'anchor', 'hazel', 'compass', 'barley', 'tide',
-  'alder', 'amber', 'aspen', 'basil', 'beacon', 'birch', 'bramble', 'bridge', 'bronze', 'burrow',
-  'canvas', 'cavern', 'chalk', 'cinder', 'cobble', 'copse', 'cotton', 'cove', 'cressy', 'crimson',
-  'damson', 'dune', 'elder', 'fathom', 'fennel', 'flint', 'forge', 'gable', 'ginger', 'granite',
-  'grove', 'gully', 'harvest', 'heath', 'hollow', 'indigo', 'ivory', 'juniper', 'kettle', 'lagoon',
-  'lattice', 'ledger', 'lichen', 'lilac', 'lumber', 'mallow', 'mantle', 'marsh', 'mica', 'millet',
-  'mortar', 'nettle', 'nutmeg', 'oakum', 'onyx', 'osprey', 'parsley', 'pewter', 'pilot', 'plover',
-  'pollen', 'pumice', 'quarry', 'quince', 'rafter', 'reed', 'rosin', 'rowan', 'rudder', 'rushes',
-  'sable', 'sandbar', 'sedge', 'shale', 'sorrel', 'spelt', 'spindle', 'sterling', 'stipple', 'sumac',
-  'tallow', 'tamarind', 'teasel', 'thistle', 'thrush', 'tinder', 'trellis', 'vellum', 'walnut', 'yarrow',
-];
+/* The owner is sent this once and pastes it, so it has to be unguessable
+   rather than memorable.
+     - Comfortably past 128 bits, the point where brute force stops being a
+       threat at any hash speed. More would not make it safer, only longer
+       to paste on a phone.
+     - Alphabet drops i, l, o and u, the characters people misread or
+       mishear if the password ever gets read down a phone.
+     - Grouped in fives so a human can check it against the message.
+   30 characters x log2(30) is 147 bits, in six clean groups of five. */
+const PASSWORD_ALPHABET = 'abcdefghjkmnpqrstvwxyz23456789';
+const PASSWORD_LENGTH   = 30;
 
 function generatePassword() {
-  const pick = () => PASSWORD_WORDS[crypto.randomInt(PASSWORD_WORDS.length)];
-  return `${pick()}-${pick()}-${pick()}-${pick()}-${pick()}-${crypto.randomInt(10, 100)}`;
+  let out = '';
+  for (let i = 0; i < PASSWORD_LENGTH; i++) {
+    // randomInt is uniform over the range, so no modulo bias from 256 % 30.
+    out += PASSWORD_ALPHABET[crypto.randomInt(PASSWORD_ALPHABET.length)];
+    if (i % 5 === 4 && i !== PASSWORD_LENGTH - 1) out += '-';
+  }
+  return out;
 }
 
 main();
