@@ -2,7 +2,7 @@
  * demo/auth.js: password gate and session tokens for the private demo pages.
  *
  * Passwords
- *   Each demo stores only a salted SHA-256 hash of its password, produced at
+ *   Each demo stores only a salted PBKDF2-SHA256 hash of its password, made at
  *   build time by scripts/demo-build.js. The check here hashes the submitted
  *   password with the same salt and compares in constant time, so neither the
  *   password nor a timing hint ever leaves the worker.
@@ -30,9 +30,26 @@ export const ATTEMPT_WINDOW_MS = 10 * 60 * 1000;
 export const DEFAULT_TTL_MS    = 2 * 60 * 60 * 1000;
 
 const attemptStore = new Map();
+const MAX_TRACKED_ATTEMPTS = 5000;
 
-export function guardAuthAttempts(ip, now = Date.now()) {
-  const entry = attemptStore.get(ip);
+/* Keyed per demo as well as per visitor: wrong guesses at one business's
+   preview must not lock a visitor out of another business's preview. */
+function attemptKey(ip, slug) {
+  return `${slug ?? '-'}|${ip}`;
+}
+
+/* The isolate is long lived, so drop entries whose window has passed rather
+   than letting the map grow without limit. */
+function sweepAttempts(now) {
+  if (attemptStore.size < MAX_TRACKED_ATTEMPTS) return;
+  for (const [key, entry] of attemptStore) {
+    if (now - entry.windowStart > ATTEMPT_WINDOW_MS) attemptStore.delete(key);
+  }
+  if (attemptStore.size >= MAX_TRACKED_ATTEMPTS) attemptStore.clear();
+}
+
+export function guardAuthAttempts(ip, slug, now = Date.now()) {
+  const entry = attemptStore.get(attemptKey(ip, slug));
   if (!entry || now - entry.windowStart > ATTEMPT_WINDOW_MS) return null;
   if (entry.count >= MAX_ATTEMPTS) {
     const minutes = Math.max(1, Math.ceil((ATTEMPT_WINDOW_MS - (now - entry.windowStart)) / 60000));
@@ -41,17 +58,19 @@ export function guardAuthAttempts(ip, now = Date.now()) {
   return null;
 }
 
-export function recordFailedAttempt(ip, now = Date.now()) {
-  const entry = attemptStore.get(ip);
+export function recordFailedAttempt(ip, slug, now = Date.now()) {
+  sweepAttempts(now);
+  const key = attemptKey(ip, slug);
+  const entry = attemptStore.get(key);
   if (!entry || now - entry.windowStart > ATTEMPT_WINDOW_MS) {
-    attemptStore.set(ip, { count: 1, windowStart: now });
+    attemptStore.set(key, { count: 1, windowStart: now });
   } else {
     entry.count += 1;
   }
 }
 
-export function clearAttempts(ip) {
-  attemptStore.delete(ip);
+export function clearAttempts(ip, slug) {
+  attemptStore.delete(attemptKey(ip, slug));
 }
 
 // Test hook: wipes the in-memory attempt counters.
@@ -66,9 +85,21 @@ export async function sha256Hex(text) {
   return bufferToHex(digest);
 }
 
-// Matches scripts/demo-build.js exactly: sha256(salt + ':' + password).
+/* PBKDF2-SHA256, matching scripts/demo-build.js exactly.
+   A plain SHA-256 is fast enough that a leaked bundle would give up the
+   password to a GPU in minutes. This costs one visitor a few milliseconds at
+   the gate and costs an offline attacker the same factor per guess. */
+export const PBKDF2_ITERATIONS = 210000;
+
 export async function hashPassword(password, salt) {
-  return sha256Hex(`${salt}:${password}`);
+  const key = await crypto.subtle.importKey(
+    'raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits'],
+  );
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', hash: 'SHA-256', salt: encoder.encode(salt), iterations: PBKDF2_ITERATIONS },
+    key, 256,
+  );
+  return [...new Uint8Array(bits)].map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 export async function checkPassword(submitted, demo) {

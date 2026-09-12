@@ -30,8 +30,11 @@ function fail(msg) { console.error(`  ERROR    ${msg}`); process.exit(1); }
 function ok(msg)   { console.log(`  ok       ${msg}`); }
 function warn(msg) { console.log(`  warn     ${msg}`); }
 
+// Must match worker/src/demo/auth.js exactly, including the iteration count.
+const PBKDF2_ITERATIONS = 210000;
+
 function hashPassword(password, salt) {
-  return crypto.createHash('sha256').update(`${salt}:${password}`).digest('hex');
+  return crypto.pbkdf2Sync(password, salt, PBKDF2_ITERATIONS, 32, 'sha256').toString('hex');
 }
 
 function buildOne(dir, slug) {
@@ -131,13 +134,30 @@ function main() {
   if (!count) warn('no demos in setup/demos/. Copy setup/examples/demos/example/ to start one.');
 }
 
-// Four random words plus a number: easy to read out, hard to guess (~50 bits).
+/* Five random words plus a two digit number, still easy to read down a phone.
+   The list is 120 words, so the keyspace is 120^5 x 90, about 41 bits. The
+   salted hash is baked into the deployed worker rather than served anywhere,
+   and the hash is PBKDF2 with 210,000 rounds, so an offline attack on a leaked
+   bundle is slow per guess as well. Four words from a 30 word list gave only
+   26 bits against a plain SHA-256, which would not have held. */
+const PASSWORD_WORDS = [
+  'oven', 'spoon', 'river', 'lantern', 'maple', 'pebble', 'harbour', 'copper', 'meadow', 'cedar',
+  'ember', 'orchard', 'saffron', 'willow', 'summit', 'velvet', 'marble', 'clover', 'north', 'ferry',
+  'poppy', 'quartz', 'timber', 'garnet', 'linen', 'anchor', 'hazel', 'compass', 'barley', 'tide',
+  'alder', 'amber', 'aspen', 'basil', 'beacon', 'birch', 'bramble', 'bridge', 'bronze', 'burrow',
+  'canvas', 'cavern', 'chalk', 'cinder', 'cobble', 'copse', 'cotton', 'cove', 'cressy', 'crimson',
+  'damson', 'dune', 'elder', 'fathom', 'fennel', 'flint', 'forge', 'gable', 'ginger', 'granite',
+  'grove', 'gully', 'harvest', 'heath', 'hollow', 'indigo', 'ivory', 'juniper', 'kettle', 'lagoon',
+  'lattice', 'ledger', 'lichen', 'lilac', 'lumber', 'mallow', 'mantle', 'marsh', 'mica', 'millet',
+  'mortar', 'nettle', 'nutmeg', 'oakum', 'onyx', 'osprey', 'parsley', 'pewter', 'pilot', 'plover',
+  'pollen', 'pumice', 'quarry', 'quince', 'rafter', 'reed', 'rosin', 'rowan', 'rudder', 'rushes',
+  'sable', 'sandbar', 'sedge', 'shale', 'sorrel', 'spelt', 'spindle', 'sterling', 'stipple', 'sumac',
+  'tallow', 'tamarind', 'teasel', 'thistle', 'thrush', 'tinder', 'trellis', 'vellum', 'walnut', 'yarrow',
+];
+
 function generatePassword() {
-  const words = ['oven', 'spoon', 'river', 'lantern', 'maple', 'pebble', 'harbour', 'copper', 'meadow', 'cedar',
-    'ember', 'orchard', 'saffron', 'willow', 'summit', 'velvet', 'marble', 'clover', 'north', 'ferry',
-    'poppy', 'quartz', 'timber', 'garnet', 'linen', 'anchor', 'hazel', 'compass', 'barley', 'tide'];
-  const pick = () => words[crypto.randomInt(words.length)];
-  return `${pick()}-${pick()}-${pick()}-${pick()}-${crypto.randomInt(10, 99)}`;
+  const pick = () => PASSWORD_WORDS[crypto.randomInt(PASSWORD_WORDS.length)];
+  return `${pick()}-${pick()}-${pick()}-${pick()}-${pick()}-${crypto.randomInt(10, 100)}`;
 }
 
 main();

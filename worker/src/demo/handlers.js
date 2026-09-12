@@ -103,7 +103,7 @@ export async function handleDemoRequest(request, env, config, url, deps) {
 }
 
 async function handleAuth(request, demo, secret, ip, respond) {
-  const lockout = guardAuthAttempts(ip);
+  const lockout = guardAuthAttempts(ip, demo.slug);
   if (lockout) return respond({ error: lockout }, 429);
 
   let body;
@@ -115,12 +115,12 @@ async function handleAuth(request, demo, secret, ip, respond) {
 
   const ok = await checkPassword(body?.password, demo);
   if (!ok) {
-    recordFailedAttempt(ip);
+    recordFailedAttempt(ip, demo.slug);
     console.warn(`[demo:${demo.slug}] wrong password from ${ip}`);
     return respond({ error: 'That password is not right.' }, 401);
   }
 
-  clearAttempts(ip);
+  clearAttempts(ip, demo.slug);
   const ttlMs = (demo.limits.sessionHours ?? 2) * 60 * 60 * 1000;
   const { token, expiresAt } = await issueToken(demo.slug, secret, ttlMs);
   return respond({ token, expiresAt }, 200);

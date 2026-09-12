@@ -41,10 +41,10 @@ const INJECTION_PATTERNS = [
 // instructions, these headings are what would leak; the output guard swaps the
 // reply for a fallback instead.
 const LEAK_MARKERS = [
-  /\bSAFETY RULES\b/, /\bTHIS IS A DEMO\b/, /\bFACTS AND HONESTY\b/, /\bSESSION STATUS\b/,
-  /\bWHAT YOU KNOW ABOUT\b/, /\bBLOCKED TOPICS\b/, /\bCONTACT METHODS AVAILABLE\b/,
-  /\bRULES: follow these\b/, /\bPASSING ON A MESSAGE\b/, /\bREAL VERSION \(/,
-  /\bKNOWLEDGE \(your only source\b/, /\bLINKS AVAILABLE AS BUTTONS\b/,
+  /\bSAFETY RULES\b/i, /\bTHIS IS A DEMO\b/i, /\bFACTS AND HONESTY\b/i, /\bSESSION STATUS\b/i,
+  /\bWHAT YOU KNOW ABOUT\b/i, /\bBLOCKED TOPICS\b/i, /\bCONTACT METHODS AVAILABLE\b/i,
+  /\bRULES: follow these\b/i, /\bPASSING ON A MESSAGE\b/i, /\bREAL VERSION \(/i,
+  /\bKNOWLEDGE \(your only source\b/i, /\bLINKS AVAILABLE AS BUTTONS\b/i,
   /\bsystem prompt\b/i, /\bmy instructions (say|state|tell)\b/i,
 ];
 

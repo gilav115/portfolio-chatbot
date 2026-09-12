@@ -24,7 +24,7 @@ import { getConfig } from './config.js';
 import { buildSystemPrompt } from './prompt.js';
 import {
   guardOrigin, guardWidgetToken, guardRateLimit,
-  guardMessageSize, guardSessionLength, guardInjection,
+  guardMessageSize, guardSessionLength, guardInjection, normaliseMessage,
   guardTopic, guardOutput,
 } from './guards.js';
 import { validateLead, guardSendRate, sendOwnerEmail } from './email.js';
@@ -147,7 +147,10 @@ async function handleChat(request, env, config) {
     return buildResponse({ error: 'Invalid JSON.' }, 400, request, config);
   }
 
-  const { message, history = [] } = body;
+  const { message: rawMessage, history = [] } = body;
+  // Strip hidden and invisible characters before any guard looks at the text,
+  // or an injection can be smuggled past the patterns inside zero width marks.
+  const message = normaliseMessage(rawMessage);
 
   const sizeError    = guardMessageSize(message, config);
   if (sizeError) return buildResponse({ error: sizeError }, 400, request, config);

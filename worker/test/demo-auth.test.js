@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
+import { pbkdf2Sync } from 'node:crypto'
 import {
-  hashPassword, checkPassword, timingSafeEqual,
+  hashPassword, checkPassword, timingSafeEqual, PBKDF2_ITERATIONS,
   issueToken, verifyToken, bearerToken,
   guardAuthAttempts, recordFailedAttempt, clearAttempts, _resetAttemptStore,
   MAX_ATTEMPTS, ATTEMPT_WINDOW_MS,
@@ -31,12 +32,18 @@ describe('password check', () => {
     expect(await checkPassword('anything', { slug: 'x' })).toBe(false)
   })
 
-  it('hash matches the build script formula sha256(salt:password)', async () => {
-    // Computed independently with: echo -n "s:p" | shasum -a 256
-    expect(await hashPassword('p', 's')).toBe('4c2d9a5ec9d7a8b1bd0f4b1fc5f0c57c1e20d1a6ae0d6a0e0ba7b8b0e59a2f6e'.length === 64
-      ? await hashPassword('p', 's') : '')
-    expect((await hashPassword('p', 's'))).toHaveLength(64)
+  /* The build script hashes the password and the worker hashes what the
+     visitor typed. If the two ever drift apart, every demo password stops
+     working at once, so pin them to the same independently computed value. */
+  it('hash matches the build script byte for byte', async () => {
+    const expected = pbkdf2Sync('p', 's', PBKDF2_ITERATIONS, 32, 'sha256').toString('hex')
+    expect(await hashPassword('p', 's')).toBe(expected)
+    expect(await hashPassword('p', 's')).toHaveLength(64)
     expect(await hashPassword('p', 's')).not.toBe(await hashPassword('p', 't'))
+  })
+
+  it('uses an iteration count high enough to slow an offline attack', () => {
+    expect(PBKDF2_ITERATIONS).toBeGreaterThanOrEqual(200000)
   })
 })
 
@@ -114,17 +121,23 @@ describe('attempt limiting', () => {
 
   it('allows up to MAX_ATTEMPTS failures then locks out for the window', () => {
     for (let i = 0; i < MAX_ATTEMPTS; i++) {
-      expect(guardAuthAttempts('1.1.1.1', 1000)).toBeNull()
-      recordFailedAttempt('1.1.1.1', 1000)
+      expect(guardAuthAttempts('1.1.1.1', 'lantern', 1000)).toBeNull()
+      recordFailedAttempt('1.1.1.1', 'lantern', 1000)
     }
-    expect(guardAuthAttempts('1.1.1.1', 1000)).toMatch(/Too many attempts/)
-    expect(guardAuthAttempts('1.1.1.1', 1000 + ATTEMPT_WINDOW_MS + 1)).toBeNull()
+    expect(guardAuthAttempts('1.1.1.1', 'lantern', 1000)).toMatch(/Too many attempts/)
+    expect(guardAuthAttempts('1.1.1.1', 'lantern', 1000 + ATTEMPT_WINDOW_MS + 1)).toBeNull()
   })
 
   it('is per visitor and clears on success', () => {
-    for (let i = 0; i < MAX_ATTEMPTS; i++) recordFailedAttempt('a', 1000)
-    expect(guardAuthAttempts('b', 1000)).toBeNull()
-    clearAttempts('a')
-    expect(guardAuthAttempts('a', 1000)).toBeNull()
+    for (let i = 0; i < MAX_ATTEMPTS; i++) recordFailedAttempt('a', 'lantern', 1000)
+    expect(guardAuthAttempts('b', 'lantern', 1000)).toBeNull()
+    clearAttempts('a', 'lantern')
+    expect(guardAuthAttempts('a', 'lantern', 1000)).toBeNull()
+  })
+
+  it('locks out one demo without locking out another on the same address', () => {
+    for (let i = 0; i < MAX_ATTEMPTS; i++) recordFailedAttempt('1.1.1.1', 'lantern', 1000)
+    expect(guardAuthAttempts('1.1.1.1', 'lantern', 1000)).toMatch(/Too many attempts/)
+    expect(guardAuthAttempts('1.1.1.1', 'beacon', 1000)).toBeNull()
   })
 })
