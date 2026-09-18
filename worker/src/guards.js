@@ -126,16 +126,29 @@ export function guardSessionLength(history, config) {
   return null;
 }
 
+// Assistant turns in the history are checked only for attempts to override the
+// rules. The bot's own real replies can say things like "I can't share my system
+// prompt", and that must not block the rest of the conversation.
+const ASSISTANT_TURN_PATTERNS = [
+  /ignore (previous|above|all) instructions/i,
+  /forget (everything|all|your instructions)/i,
+  /override (your|the) (rules|instructions)/i,
+  /disregard (your|the|previous)/i,
+];
+
 // Blocks common prompt injection attempts: phrases visitors use to try to
 // override the system prompt, extract instructions, or change the bot's identity.
-// Checks the new message and every history entry, because the browser sends the
-// history and can put anything in it, including made-up "assistant" turns.
+// Checks the new message and the history, because the browser sends the history
+// and can put anything in it, including made-up "assistant" turns.
 // This is a pre-filter; the system prompt itself also enforces the hierarchy as a second layer.
 export function guardInjection(message, history = []) {
-  const texts = [message, ...history.map(item => item?.content)];
-  for (const text of texts) {
+  const checks = [[message, INJECTION_PATTERNS]];
+  for (const item of history) {
+    checks.push([item?.content, item?.role === 'assistant' ? ASSISTANT_TURN_PATTERNS : INJECTION_PATTERNS]);
+  }
+  for (const [text, patterns] of checks) {
     if (typeof text !== 'string') continue;
-    if (INJECTION_PATTERNS.some(pattern => pattern.test(text))) {
+    if (patterns.some(pattern => pattern.test(text))) {
       console.warn('[guard:injection] Injection attempt blocked.');
       return 'That kind of message cannot be processed.';
     }
