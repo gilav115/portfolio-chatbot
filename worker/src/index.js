@@ -10,7 +10,7 @@
  * /chat guard order (each guard returns null on pass, string on fail):
  *   1. guardOrigin      : request must come from an allowedOrigins domain
  *   2. guardWidgetToken : X-Widget-Token header must match WIDGET_TOKEN secret
- *   3. guardRateLimit   : enforces rateLimitRpm per IP
+ *   3. guardRateLimit   : enforces rateLimitRpm per IP (in memory, then the shared CHAT_RATE_LIMITER)
  *   4. guardMessageSize : message must be a non-empty string under maxMessageLength
  *   5. guardSessionLength: history must not exceed maxSessionMessages
  *   6. guardInjection   : blocks prompt injection phrases
@@ -22,7 +22,7 @@ import { buildSystemPrompt, hasContactButtons } from './prompt.js';
 import {
   guardOrigin, guardWidgetToken, guardRateLimit,
   guardMessageSize, guardSessionLength, guardInjection,
-  guardTopic, guardOutput, normaliseOrigin,
+  guardTopic, guardOutput, normaliseOrigin, guardSharedRateLimit,
 } from './guards.js';
 
 // Matched as whole words, so "rate" does not match "integrate" or "accurate".
@@ -96,7 +96,7 @@ async function handleChat(request, env, config) {
   if (tokenError) return buildResponse({ error: tokenError }, 401, request, config);
 
   const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown';
-  const rateLimitError = guardRateLimit(ip, config);
+  const rateLimitError = guardRateLimit(ip, config) ?? await guardSharedRateLimit(env, ip);
   if (rateLimitError) return buildResponse({ error: rateLimitError }, 429, request, config);
 
   let body;

@@ -93,13 +93,13 @@ step "1 of 7   Dependencies"
 # ════════════════════════════════════════════════════════════════════════════
 
 if ! command -v node &>/dev/null; then
-  fail "Node.js is not installed. Install it from nodejs.org (version 18 or newer), then run this script again."
+  fail "Node.js is not installed. Install it from nodejs.org (version 22 or newer), then run this script again."
 fi
 
 NODE_VERSION="$(node --version)"
 NODE_MAJOR="$(echo "$NODE_VERSION" | sed 's/v\([0-9]*\).*/\1/')"
-if [ "$NODE_MAJOR" -lt 18 ]; then
-  fail "Node.js $NODE_VERSION is too old. Version 18 or newer is required. Update at nodejs.org, then run this script again."
+if [ "$NODE_MAJOR" -lt 22 ]; then
+  fail "Node.js $NODE_VERSION is too old. Version 22 or newer is required. Update at nodejs.org, then run this script again."
 fi
 ok "Node.js $NODE_VERSION"
 

@@ -89,6 +89,24 @@ export function guardRateLimit(ip, config) {
   return null;
 }
 
+// Shared rate limit, using Cloudflare's rate limiting binding (CHAT_RATE_LIMITER
+// in wrangler.toml). Unlike the in-memory limit above, it is shared by all copies
+// of the worker in a Cloudflare location. If the binding is missing or fails, the
+// request is allowed: the in-memory limit still applies.
+export async function guardSharedRateLimit(env, key) {
+  const limiter = env?.CHAT_RATE_LIMITER;
+  if (!limiter) return null;
+  try {
+    const { success } = await limiter.limit({ key });
+    if (success) return null;
+    console.warn(`[guard:rate] ${key} hit the shared rate limit`);
+    return 'Too many requests. Please slow down and try again in a minute.';
+  } catch (err) {
+    console.error('[guard:rate] Shared rate limiter failed:', err);
+    return null;
+  }
+}
+
 function pruneRateLimitStore(now) {
   for (const [ip, entry] of rateLimitStore) {
     if (now - entry.windowStart > RATE_WINDOW_MS) rateLimitStore.delete(ip);

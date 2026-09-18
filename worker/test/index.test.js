@@ -123,3 +123,31 @@ describe('GET /widget-config', () => {
     expect((await res.json()).maxMessageLength).toBe(300)
   })
 })
+
+describe('shared rate limit', () => {
+  it('returns 429 when the shared limiter says no', async () => {
+    const worker = await loadWorker()
+    const res = await worker.fetch(chatRequest({ message: 'hello there' }), envWith({}, {
+      CHAT_RATE_LIMITER: { limit: async () => ({ success: false }) },
+    }))
+    expect(res.status).toBe(429)
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('keys the limit by visitor IP', async () => {
+    const limit = vi.fn(async () => ({ success: true }))
+    const worker = await loadWorker()
+    await worker.fetch(chatRequest({ message: 'hello there' }, { 'CF-Connecting-IP': '203.0.113.7' }), envWith({}, {
+      CHAT_RATE_LIMITER: { limit },
+    }))
+    expect(limit).toHaveBeenCalledWith({ key: '203.0.113.7' })
+  })
+
+  it('allows the request when the limiter fails', async () => {
+    const worker = await loadWorker()
+    const res = await worker.fetch(chatRequest({ message: 'hello there' }), envWith({}, {
+      CHAT_RATE_LIMITER: { limit: async () => { throw new Error('down') } },
+    }))
+    expect(res.status).toBe(200)
+  })
+})

@@ -5,6 +5,19 @@ name = "portfolio-chatbot-worker"  # Becomes <name>.<your-account>.workers.dev �
 main = "src/index.js"
 compatibility_date = "2024-01-01"
 
+# ── Shared rate limit ──────────────────────────────────────────────────────────
+# Counts requests per visitor IP across all Cloudflare servers in a location,
+# so it holds even when Cloudflare runs many copies of the worker.
+# limit = requests per period. period must be 10 or 60 (seconds).
+# namespace_id is any number unique to this limiter in your Cloudflare account.
+[[ratelimits]]
+name = "CHAT_RATE_LIMITER"
+namespace_id = "1001"
+
+  [ratelimits.simple]
+  limit = 10
+  period = 60
+
 # ── Secrets (set via build script or CLI — never commit values here) ───────────
 #
 # Run once to set your API key and widget token:
@@ -18,6 +31,6 @@ compatibility_date = "2024-01-01"
 # All secrets are encrypted at rest in Cloudflare. They are never in source code.
 
 # ── Rate limiting note ─────────────────────────────────────────────────────────
-# The in-memory rate limit store in guards.js is per-isolate. Cloudflare may
-# spin up multiple isolates under load, so limits are approximate rather than
-# exact across all traffic. For stricter enforcement, use Durable Objects or KV.
+# Two limits apply to /chat. CHAT_RATE_LIMITER above is shared by all copies of
+# the worker in a Cloudflare location. security.rateLimitRpm in setup/config.json
+# is a second, in-memory limit per copy of the worker.

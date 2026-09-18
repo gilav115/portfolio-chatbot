@@ -106,12 +106,12 @@ if ! command -v python3 &>/dev/null; then
   fail "python3 is required but not found. Install it and run this script again."
 fi
 if ! command -v node &>/dev/null; then
-  fail "Node.js is not installed. Install it from nodejs.org (version 18 or newer)."
+  fail "Node.js is not installed. Install it from nodejs.org (version 22 or newer)."
 fi
 NODE_VERSION="$(node --version 2>/dev/null || echo 'v0')"
 NODE_MAJOR="${NODE_VERSION#v}"; NODE_MAJOR="${NODE_MAJOR%%.*}"
-if [ "${NODE_MAJOR:-0}" -lt 18 ] 2>/dev/null; then
-  fail "Node.js 18 or newer is required (you have $NODE_VERSION). Install from nodejs.org."
+if [ "${NODE_MAJOR:-0}" -lt 22 ] 2>/dev/null; then
+  fail "Node.js 22 or newer is required (you have $NODE_VERSION). Install from nodejs.org."
 fi
 
 # Create config.json from example if missing

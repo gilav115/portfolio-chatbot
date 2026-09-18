@@ -45,7 +45,7 @@ You need:
 
 * A Cloudflare account (free tier is enough). Sign up at cloudflare.com.
 * An API key from OpenAI or Anthropic. See [Getting an API key](#getting-an-api-key) below.
-* Node.js 18 or newer. Check by running `node --version` in your terminal.
+* Node.js 22 or newer. Check by running `node --version` in your terminal.
 * Python 3. Check by running `python3 --version`. Comes preinstalled on macOS and most Linux systems.
 
 
@@ -232,7 +232,7 @@ All optional. Only the methods you configure get shown as buttons.
 | Field | Default | Description |
 |---|---|---|
 | `security.allowedOrigins` | `[]` | Websites allowed to use your worker, e.g. `https://yoursite.com`. Empty means every website: not recommended when live. When the list is not empty, the deploy script adds the widget's standalone page to it. |
-| `security.rateLimitRpm` | `10` | Max requests per visitor per minute (approximate, see [Security model](#security-model)) |
+| `security.rateLimitRpm` | `10` | Max requests per visitor per minute, counted by each copy of the worker. The shared limit across all copies is set in `worker/wrangler.toml` (`CHAT_RATE_LIMITER`, also 10 per minute). |
 | `security.maxMessageLength` | `500` | Max characters in a visitor message. The widget uses the same limit. |
 | `security.maxSessionMessages` | `20` | Max history messages the widget may send with one request |
 
@@ -268,7 +268,7 @@ Locally, the widget token and origin checks are off, so you can test freely. Use
 
 * All secrets are encrypted Cloudflare Worker secrets: never in source code or git history
 * `WIDGET_TOKEN` and `allowedOrigins` stop other websites from embedding your bot. They do not stop a determined person: the token is visible in your page source, and scripts outside a browser can send any `Origin` header
-* A per-visitor rate limit slows down abuse. It is kept in memory on each Cloudflare instance, so it is approximate, and there is no overall spending cap. Set a monthly budget limit with your AI provider as the real cost guard
+* A per-visitor rate limit slows down abuse: 10 messages per minute by default, shared by all copies of the worker in a Cloudflare location (Cloudflare's rate limiting binding, set in `worker/wrangler.toml`). It is approximate by design, and there is no overall spending cap, so also set a monthly budget limit with your AI provider
 * Every visitor message, and the chat history the browser sends with it, is checked before reaching the AI: size, injection patterns, topic keywords
 * The system prompt enforces strict context boundaries as a second layer
 * Replies are sanitised and length-capped before being sent back to the visitor
