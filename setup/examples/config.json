@@ -1,0 +1,77 @@
+{
+  "_comment": "Copy this file to setup/config.json and fill it in. setup/config.json is gitignored.",
+
+  "botName": "YOUR_BOT_NAME",
+  "ownerName": "YOUR_NAME",
+
+  "tone": "professional",
+  "_toneOptions": ["professional", "casual", "direct", "warm", "technical", "formal", "founder"],
+
+  "maxAnswerWords": 80,
+  "historyTurns": 4,
+  "_historyNote": "Each turn = one user message + one reply. Higher = more context but more cost and privacy exposure.",
+
+  "contactMethods": {
+    "email":    "hello@example.com",
+    "linkedin": null,
+    "whatsapp": null,
+    "_whatsappNote": "Phone number with country code, digits only. e.g. 447000000000",
+    "sms":      null,
+    "calendar": null,
+    "_calendarNote": "Full URL to your booking page. e.g. https://cal.com/yourname/intro",
+    "github":   null,
+    "custom":   [],
+    "_customNote": "Add entries as { label: 'Label', href: 'https://...' }"
+  },
+
+  "allowedTopics": [],
+  "_allowedTopicsNote": "Keywords the bot is allowed to discuss. Empty = allow anything in the profile. e.g. ['services', 'experience', 'contact']",
+
+  "blockedTopics": [
+    "personal life",
+    "politics",
+    "medical advice",
+    "legal advice",
+    "financial advice"
+  ],
+
+  "leadCapture": {
+    "enabled": false,
+    "trigger": "on_intent"
+  },
+
+  "security": {
+    "allowedOrigins": [
+      "https://your-website.com",
+      "https://www.your-website.com"
+    ],
+    "_originsNote": "Only these origins can use your bot. Include every domain variant (www and non-www).",
+    "maxMessageLength": 500,
+    "rateLimitRpm": 10,
+    "maxSessionMessages": 20
+  },
+
+  "llm": {
+    "provider": "openai",
+    "_providerOptions": ["openai", "anthropic"],
+    "_providerNote": "openai uses the OpenAI Chat Completions API. anthropic uses Anthropic Claude. Both use the same LLM_API_KEY secret.",
+    "model": null,
+    "_modelNote": "null uses the provider default. openai default: gpt-4o-mini. anthropic default: claude-haiku-4-5-20251001. Other openai options: gpt-4o, gpt-4-turbo. Other anthropic options: claude-sonnet-4-6."
+  },
+
+  "ui": {
+    "accentColor": "#0055ff",
+    "welcomeMessage": "Hi! Ask me anything.",
+    "suggestedQuestions": [
+      "What do you help with?",
+      "What kind of clients do you work with?",
+      "How can I contact you?"
+    ]
+  },
+
+  "deployment": {
+    "workerUrl": "",
+    "widgetUrl": "",
+    "_note": "Set automatically by scripts/setup.sh and scripts/build-and-deploy.sh. Local only."
+  }
+}

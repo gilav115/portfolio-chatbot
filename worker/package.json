@@ -1,0 +1,16 @@
+{
+  "name": "portfolio-chatbot-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev":        "wrangler dev",
+    "deploy":     "bash ../scripts/build-and-deploy.sh",
+    "test":       "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "vitest":   "^2.0.0",
+    "wrangler": "^3.0.0"
+  }
+}
