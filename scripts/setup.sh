@@ -14,6 +14,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SETUP_DIR="$ROOT/setup"
 export CONFIG_FILE="$SETUP_DIR/config.json"
 WORKER_DIR="$ROOT/worker"
+WRANGLER="$WORKER_DIR/node_modules/.bin/wrangler"
 EXAMPLES_DIR="$SETUP_DIR/examples"
 PROFILE_DIR="$SETUP_DIR/profile"
 
@@ -32,15 +33,14 @@ step() {
 
 # Read a dot-notation key from config.json. Returns DEFAULT if missing.
 cfg() {
-  local KEY="$1" DEFAULT="${2:-}"
-  python3 -c "
+  KEY="$1" DEFAULT="${2:-}" python3 -c "
 import json, os
+default = os.environ['DEFAULT']
 try:
     with open(os.environ['CONFIG_FILE']) as f:
         c = json.load(f)
-    parts = '$KEY'.split('.')
     v = c
-    for p in parts:
+    for p in os.environ['KEY'].split('.'):
         v = v.get(p) if isinstance(v, dict) else None
         if v is None:
             break
@@ -49,14 +49,16 @@ try:
     elif v is not None:
         print(str(v) if not isinstance(v, bool) else str(v).lower())
     else:
-        print('$DEFAULT')
+        print(default)
 except Exception:
-    print('$DEFAULT')
-" 2>/dev/null || echo "$DEFAULT"
+    print(default)
+" 2>/dev/null || echo "${2:-}"
 }
 
 # Prompt the user. Shows current config value in brackets.
-# Result goes into global _ANSWER.
+# Enter keeps the value in brackets. "-" clears the field.
+# Example placeholders are never kept: they are not shown, and Enter clears them.
+# Result goes into global _ANSWER. An empty _ANSWER means "remove this field".
 ask() {
   local LABEL="$1" KEY="${2:-}" DEFAULT="${3:-}"
   local CURRENT=""
@@ -75,7 +77,11 @@ ask() {
     printf "  %s: " "$LABEL"
   fi
   IFS= read -r _ANSWER </dev/tty || _ANSWER=""
-  [ -z "$_ANSWER" ] && _ANSWER="$CURRENT" || true
+  if [ "$_ANSWER" = "-" ]; then
+    _ANSWER=""
+  elif [ -z "$_ANSWER" ]; then
+    _ANSWER="$CURRENT"
+  fi
 }
 
 # Yes/no prompt. Returns 0 for yes, 1 for no.
@@ -130,6 +136,7 @@ fi
 echo ""
 echo "  This wizard saves all your settings to setup/config.json."
 echo "  Press Enter to keep the value shown in [brackets]."
+echo "  Type - and press Enter to clear a value."
 echo ""
 
 
@@ -223,28 +230,29 @@ UI_WELCOME="$_ANSWER"
 step "6 of 7   Deployment info"
 
 CURRENT_WORKER_URL="$(cfg 'deployment.workerUrl' '')"
+CURRENT_WIDGET_URL="$(cfg 'deployment.widgetUrl' '')"
 if [ -n "$CURRENT_WORKER_URL" ]; then
   ok "Worker URL: $CURRENT_WORKER_URL"
+  ok "Widget URL: ${CURRENT_WIDGET_URL:-not deployed yet}"
 else
-  info "Worker URL: will be set automatically when you run build-and-deploy.sh."
+  info "The worker and widget URLs are set automatically when you deploy."
 fi
-WORKER_URL_VAL=""
-
-echo ""
-echo "  Widget JS URL: where widget.js is hosted (e.g. on Cloudflare Pages)."
-echo "  Leave blank until you have hosted it. See README Step 7."
-echo ""
-
-ask "Widget JS URL (where widget.js is hosted)" "deployment.widgetUrl" ""
-WIDGET_URL_VAL="$_ANSWER"
 
 
 step "7 of 7   Cloudflare auth and secrets"
 
 cd "$WORKER_DIR"
 
+# Install wrangler first. Running "npx wrangler" without it would make npx ask to
+# download it, and that question is hidden because the output is captured here.
+if [ ! -x "$WRANGLER" ]; then
+  info "Installing dependencies (first run only)..."
+  npm install --silent || fail "npm install failed in worker/. Fix the error above and run this script again."
+  ok "Dependencies installed."
+fi
+
 info "Checking Cloudflare authentication..."
-WHOAMI_OUTPUT="$(npx wrangler whoami 2>&1 || true)"
+WHOAMI_OUTPUT="$("$WRANGLER" whoami 2>&1 || true)"
 
 CF_AUTHED=1
 if echo "$WHOAMI_OUTPUT" | grep -qi "not authenticated\|not logged in\|no config\|must be logged in"; then
@@ -267,7 +275,7 @@ WIDGET_TOKEN_VAL=""
 if [ "$CF_AUTHED" -eq 1 ]; then
   echo ""
   info "Checking secrets..."
-  SECRET_LIST="$(npx wrangler secret list 2>/dev/null || echo '')"
+  SECRET_LIST="$("$WRANGLER" secret list 2>/dev/null || echo '')"
 
   if echo "$SECRET_LIST" | grep -q "LLM_API_KEY"; then
     ok "LLM_API_KEY is already set."
@@ -286,8 +294,11 @@ if [ "$CF_AUTHED" -eq 1 ]; then
       IFS= read -rs LLM_KEY_INPUT </dev/tty || LLM_KEY_INPUT=""
       echo ""
       if [ -n "$LLM_KEY_INPUT" ]; then
-        printf '%s' "$LLM_KEY_INPUT" | npx wrangler secret put LLM_API_KEY 2>&1 | grep -v "^$" | sed 's/^/           /'
-        ok "LLM_API_KEY stored."
+        if printf '%s' "$LLM_KEY_INPUT" | "$WRANGLER" secret put LLM_API_KEY 2>&1 | sed 's/^/           /'; then
+          ok "LLM_API_KEY stored."
+        else
+          warn "Could not store LLM_API_KEY. Try again with: cd worker && npx wrangler secret put LLM_API_KEY"
+        fi
       else
         warn "No key entered. When ready, run:"
         echo "    cd worker && npx wrangler secret put LLM_API_KEY"
@@ -314,8 +325,12 @@ except Exception:
   else
     info "Generating WIDGET_TOKEN..."
     WIDGET_TOKEN_VAL="$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")"
-    printf '%s' "$WIDGET_TOKEN_VAL" | npx wrangler secret put WIDGET_TOKEN 2>&1 | grep -v "^$" | sed 's/^/           /'
-    ok "WIDGET_TOKEN generated and stored."
+    if printf '%s' "$WIDGET_TOKEN_VAL" | "$WRANGLER" secret put WIDGET_TOKEN 2>&1 | sed 's/^/           /'; then
+      ok "WIDGET_TOKEN generated and stored."
+    else
+      warn "Could not store WIDGET_TOKEN. The deploy script will try again."
+      WIDGET_TOKEN_VAL=""
+    fi
   fi
 fi
 
@@ -329,7 +344,7 @@ export BOT_NAME OWNER_NAME TONE RESPONSE_STYLE
 export CONTACT_EMAIL CONTACT_LINKEDIN CONTACT_WHATSAPP CONTACT_SMS CONTACT_CALENDAR CONTACT_GITHUB
 export ALLOWED_ORIGINS LLM_PROVIDER LLM_MODEL
 export UI_ACCENT UI_WELCOME
-export WORKER_URL_VAL WIDGET_URL_VAL WIDGET_TOKEN_VAL
+export WIDGET_TOKEN_VAL
 
 python3 - <<'PYEOF'
 import json, os
@@ -351,32 +366,30 @@ def clean(obj):
 
 c = clean(c)
 
-def sv(key_path, val):
-    if not val or val in ('None', 'null', 'false', 'true'):
-        if val in ('false', 'true'):
-            keys = key_path.split('.')
-            obj = c
-            for k in keys[:-1]:
-                obj = obj.setdefault(k, {})
-            obj[keys[-1]] = val == 'true'
-        return
+def put(key_path, value):
     keys = key_path.split('.')
     obj = c
     for k in keys[:-1]:
-        obj = obj.setdefault(k, {})
-    obj[keys[-1]] = val
+        if not isinstance(obj.get(k), dict):
+            obj[k] = {}
+        obj = obj[k]
+    if value is None:
+        obj.pop(keys[-1], None)   # an empty answer removes the field
+    else:
+        obj[keys[-1]] = value
+
+def sv(key_path, val):
+    val = (val or '').strip()
+    if val in ('', 'None', 'null'):
+        put(key_path, None)
+    elif val in ('true', 'false'):
+        put(key_path, val == 'true')
+    else:
+        put(key_path, val)
 
 def sv_list(key_path, csv):
-    if not csv or csv in ('None', 'null'):
-        return
-    items = [v.strip() for v in csv.split(',') if v.strip()]
-    if not items:
-        return
-    keys = key_path.split('.')
-    obj = c
-    for k in keys[:-1]:
-        obj = obj.setdefault(k, {})
-    obj[keys[-1]] = items
+    items = [v.strip().rstrip('/') for v in (csv or '').split(',') if v.strip()]
+    put(key_path, items or None)
 
 sv('botName',                   os.environ['BOT_NAME'])
 sv('ownerName',                 os.environ['OWNER_NAME'])
@@ -393,9 +406,9 @@ sv('llm.provider',              os.environ['LLM_PROVIDER'])
 sv('llm.model',                 os.environ['LLM_MODEL'])
 sv('ui.accentColor',            os.environ['UI_ACCENT'])
 sv('ui.welcomeMessage',         os.environ['UI_WELCOME'])
-sv('deployment.workerUrl',      os.environ['WORKER_URL_VAL'])
-sv('deployment.widgetUrl',      os.environ['WIDGET_URL_VAL'])
-sv('deployment.widgetToken',    os.environ['WIDGET_TOKEN_VAL'])
+# Deployment values are managed by the deploy script: only store a newly created token.
+if os.environ['WIDGET_TOKEN_VAL']:
+    sv('deployment.widgetToken', os.environ['WIDGET_TOKEN_VAL'])
 
 with open(config_file, 'w') as f:
     json.dump(c, f, indent=2)

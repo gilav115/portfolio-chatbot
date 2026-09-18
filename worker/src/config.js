@@ -17,7 +17,6 @@ const DEFAULTS = {
   contactMethods: {},
   allowedTopics: [],
   blockedTopics: ['personal life', 'politics', 'medical advice', 'legal advice', 'financial advice'],
-  leadCapture: { enabled: false, trigger: 'on_intent' },
   security: {
     allowedOrigins: [],
     maxMessageLength: 500,
@@ -53,8 +52,44 @@ export function getConfig(env) {
   } else {
     console.warn('[config] BOT_CONFIG_JSON not set: using defaults. Run the build script to set it.');
   }
-  _config = deepMerge(DEFAULTS, parsed);
+  _config = normalise(deepMerge(DEFAULTS, parsed));
   return _config;
+}
+
+// config.json is edited by hand, so fix the types the code relies on here, once,
+// instead of crashing mid-request (for example a WhatsApp number typed without quotes).
+function normalise(config) {
+  const strings = (list) => (Array.isArray(list) ? list : [])
+    .filter(x => typeof x === 'string' || typeof x === 'number')
+    .map(x => String(x).trim())
+    .filter(Boolean);
+
+  const contact = config.contactMethods && typeof config.contactMethods === 'object' ? config.contactMethods : {};
+  const contactMethods = {};
+  for (const key of ['email', 'linkedin', 'whatsapp', 'sms', 'calendar', 'github']) {
+    const value = contact[key];
+    if (typeof value === 'string' || typeof value === 'number') {
+      const text = String(value).trim();
+      if (text) contactMethods[key] = text;
+    }
+  }
+  contactMethods.custom = (Array.isArray(contact.custom) ? contact.custom : [])
+    .filter(c => c && typeof c.label === 'string' && typeof c.href === 'string' && c.label.trim() && c.href.trim());
+
+  return {
+    ...config,
+    contactMethods,
+    allowedTopics: strings(config.allowedTopics),
+    blockedTopics: strings(config.blockedTopics),
+    security: {
+      ...config.security,
+      allowedOrigins: strings(config.security?.allowedOrigins),
+    },
+    ui: {
+      ...config.ui,
+      suggestedQuestions: strings(config.ui?.suggestedQuestions),
+    },
+  };
 }
 
 // Recursively merges override into base. Arrays are replaced (not concatenated)

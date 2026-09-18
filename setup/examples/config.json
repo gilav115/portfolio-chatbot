@@ -35,11 +35,6 @@
     "financial advice"
   ],
 
-  "leadCapture": {
-    "enabled": false,
-    "trigger": "on_intent"
-  },
-
   "security": {
     "allowedOrigins": [
       "https://your-website.com",

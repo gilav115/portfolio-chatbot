@@ -18,13 +18,14 @@
  */
 
 import { getConfig } from './config.js';
-import { buildSystemPrompt } from './prompt.js';
+import { buildSystemPrompt, hasContactButtons } from './prompt.js';
 import {
   guardOrigin, guardWidgetToken, guardRateLimit,
   guardMessageSize, guardSessionLength, guardInjection,
-  guardTopic, guardOutput,
+  guardTopic, guardOutput, normaliseOrigin,
 } from './guards.js';
 
+// Matched as whole words, so "rate" does not match "integrate" or "accurate".
 const LEAD_INTENT_KEYWORDS = [
   'hire', 'work with', 'work together', 'pricing', 'price', 'cost', 'rate',
   'book a call', 'get in touch', 'reach out', 'quote', 'available for',
@@ -34,6 +35,13 @@ const LEAD_INTENT_KEYWORDS = [
   'email address', 'connect with you', 'how do i message', 'linkedin',
   'whatsapp', 'drop you', 'send you',
 ];
+const LEAD_INTENT_PATTERN = new RegExp(
+  `\\b(?:${LEAD_INTENT_KEYWORDS.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\b`, 'i'
+);
+
+// Profile text is uploaded in numbered pieces: PROFILE_TEXT_1, PROFILE_TEXT_2, ...
+// Read them in order until one is missing. The deploy script removes leftover pieces.
+const MAX_PROFILE_PIECES = 200;
 
 export default {
   async fetch(request, env) {
@@ -69,6 +77,7 @@ async function handleRequest(request, env) {
       welcomeMessage:     config.ui?.welcomeMessage ?? `Hi! I'm ${config.botName}. How can I help?`,
       accentColor:        config.ui?.accentColor ?? '#0055ff',
       suggestedQuestions: config.ui?.suggestedQuestions ?? [],
+      maxMessageLength:   config.security?.maxMessageLength ?? 500,
     }, 200, request, config);
   }
 
@@ -96,6 +105,9 @@ async function handleChat(request, env, config) {
   } catch {
     return buildResponse({ error: 'Invalid JSON.' }, 400, request, config);
   }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return buildResponse({ error: 'Invalid request.' }, 400, request, config);
+  }
 
   const { message, history = [] } = body;
 
@@ -105,14 +117,13 @@ async function handleChat(request, env, config) {
   const sessionError = guardSessionLength(history, config);
   if (sessionError) return buildResponse({ error: sessionError }, 400, request, config);
 
-  const injectionError = guardInjection(message);
+  const injectionError = guardInjection(message, history);
   if (injectionError) return buildResponse({ error: injectionError }, 400, request, config);
 
   const topicError = guardTopic(message, config);
   if (topicError) return buildResponse({ reply: topicError }, 200, request, config);
 
-  let profileText = env.PROFILE_TEXT_1 ?? env.PROFILE_TEXT ?? '';
-  for (let i = 2; i <= 10; i++) profileText += env[`PROFILE_TEXT_${i}`] ?? '';
+  const profileText  = readProfile(env);
   const systemPrompt = buildSystemPrompt(config, profileText);
   const trimmedHistory = trimHistory(history, config);
 
@@ -127,9 +138,11 @@ async function handleChat(request, env, config) {
     );
   }
 
-  reply = guardOutput(reply, config.ownerName);
+  reply = guardOutput(reply, config.ownerName, hasContactButtons(config.contactMethods));
 
-  const cta = detectLeadIntent(message)
+  // Show the buttons when the visitor asks about contact, or when the reply
+  // points to them (the fallback answer and the contact rule both do).
+  const cta = detectLeadIntent(message) || /contact buttons?/i.test(reply)
     ? buildCTAs(config.contactMethods)
     : [];
 
@@ -141,8 +154,19 @@ function trimHistory(history, config) {
   return history.slice(-(turns * 2));
 }
 
+function readProfile(env) {
+  if (!env.PROFILE_TEXT_1) return env.PROFILE_TEXT ?? '';
+  let text = '';
+  for (let i = 1; i <= MAX_PROFILE_PIECES; i++) {
+    const piece = env[`PROFILE_TEXT_${i}`];
+    if (piece === undefined) break;
+    text += piece;
+  }
+  return text;
+}
+
 function detectLeadIntent(message) {
-  return LEAD_INTENT_KEYWORDS.some(kw => message.toLowerCase().includes(kw));
+  return LEAD_INTENT_PATTERN.test(message);
 }
 
 function buildCTAs(contactMethods) {
@@ -173,10 +197,13 @@ async function callLLM(systemPrompt, history, message, env, config) {
 
 // OpenAI Chat Completions API.
 // Default model: gpt-4o-mini (cheap, fast, good quality for this use case).
-// Override via llm.model in bot.config.json (e.g. "gpt-4o", "gpt-4-turbo").
+// Override via llm.model in setup/config.json (e.g. "gpt-4o", "gpt-4.1-mini", "gpt-5-mini").
+// Reasoning models (o-series, gpt-5) reject temperature, and spend part of the
+// token budget on hidden reasoning, so they get a larger budget and low effort.
 async function callOpenAI(systemPrompt, history, message, env, config) {
   const maxTokens = Math.ceil((config.maxAnswerWords ?? 80) * 1.5) + 50;
   const model     = config.llm?.model ?? 'gpt-4o-mini';
+  const reasoning = /^(o\d|gpt-5)/i.test(model);
   const messages  = [
     { role: 'system', content: systemPrompt },
     ...history,
@@ -189,7 +216,9 @@ async function callOpenAI(systemPrompt, history, message, env, config) {
       'Content-Type':  'application/json',
       'Authorization': `Bearer ${env.LLM_API_KEY}`,
     },
-    body: JSON.stringify({ model, messages, max_tokens: maxTokens, temperature: 0.4 }),
+    body: JSON.stringify(reasoning
+      ? { model, messages, max_completion_tokens: maxTokens + 2000, reasoning_effort: 'low' }
+      : { model, messages, max_completion_tokens: maxTokens, temperature: 0.4 }),
     signal: AbortSignal.timeout(25000),
   });
 
@@ -234,13 +263,15 @@ async function callAnthropic(systemPrompt, history, message, env, config) {
 function buildResponse(body, status, request, config) {
   const allowedOrigins = config?.security?.allowedOrigins ?? [];
   const origin         = request?.headers?.get('Origin') ?? '';
-  const originAllowed  = !allowedOrigins.length || allowedOrigins.includes(origin);
+  const originAllowed  = !allowedOrigins.length || allowedOrigins.map(normaliseOrigin).includes(normaliseOrigin(origin));
 
   const headers = {
     'Content-Type':               'application/json',
     'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, X-Widget-Token',
     'X-Content-Type-Options':     'nosniff',
+    // The CORS header below changes with the Origin, so caches must key on it.
+    'Vary':                       'Origin',
   };
 
   // Only set Access-Control-Allow-Origin when the origin is permitted.

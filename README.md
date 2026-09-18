@@ -26,12 +26,15 @@ Run it again any time to update a setting.
 
 ```
 setup/
-  config.json     your settings (name, contact methods, colours)
-  about.md        who you are and what you do
-  contact.md      how visitors can reach you
-  services.md     what you offer (optional)
-  ...
+  config.json       your settings (name, contact methods, colours)
+  profile/
+    about.md        who you are and what you do
+    contact.md      how visitors can reach you
+    services.md     what you offer (optional)
+    ...
 ```
+
+The bot answers only from the `.md` files in `setup/profile/`.
 
 You fill in the `setup/` folder. The rest is code you do not need to touch.
 
@@ -56,7 +59,7 @@ cd portfolio-chatbot
 ```
 
 
-If you used the Quick Start wizard above, you can skip Steps 2, 3, and 4: the wizard handles them automatically. These steps are for manual setup or if you want to understand what happens under the hood.
+If you used the Quick Start wizard above, you can skip Steps 2 and 3: the wizard handles them automatically. These steps are for manual setup or if you want to understand what happens under the hood.
 
 
 ## Step 2: Connect to Cloudflare
@@ -79,20 +82,7 @@ cd worker && npx wrangler secret put LLM_API_KEY
 Paste your API key when prompted and press Enter. Wrangler sends it to Cloudflare, where it is encrypted and stored securely. It is never in your code or files and cannot be read back: not even by you.
 
 
-## Step 4: Create a widget token
-
-```bash
-cd worker && npx wrangler secret put WIDGET_TOKEN
-```
-
-Make up any long random string, at least 20 characters. Write it down: you will paste it into your website later. Or generate one:
-
-```bash
-python3 -c "import secrets; print(secrets.token_urlsafe(18))"
-```
-
-
-## Step 5: Fill in your details
+## Step 4: Fill in your details
 
 If `setup/config.json` does not exist yet, copy it from `setup/examples/config.json` first.
 
@@ -115,14 +105,20 @@ Open `setup/config.json` in any text editor. Fill in at minimum:
 }
 ```
 
-`allowedOrigins` must match your website's domain exactly: include both the `www` and non-`www` versions. Requests from other domains will be blocked. **If you leave this empty when you go live, anyone on the internet can query your worker and run up your API costs.** Only leave it empty during local development.
+`allowedOrigins` lists the websites that may use your bot: include both the `www` and non-`www` versions. A trailing slash does not matter. Browser requests from other websites are blocked. If the list is empty, every website is allowed: fine for testing, not for going live.
 
-Then open `setup/about.md` and write about yourself. The more accurate and complete, the better the bot performs. Open `setup/contact.md` and describe how and when visitors should reach you.
+Then write your profile in `setup/profile/`. If the folder does not exist yet, copy the examples:
+
+```bash
+mkdir -p setup/profile && cp setup/examples/*.md setup/profile/
+```
+
+Each example file starts with a `PORTFOLIO-CHATBOT-EXAMPLE` line. Replace the content with your own, then delete that line. The deploy script skips any file that still has it. At minimum, fill in `setup/profile/about.md` and `setup/profile/contact.md`.
 
 See [All configuration options](#all-configuration-options) and [Profile files](#profile-files) below for everything you can set.
 
 
-## Step 6: Deploy
+## Step 5: Deploy
 
 ```bash
 bash scripts/build-and-deploy.sh
@@ -131,68 +127,40 @@ bash scripts/build-and-deploy.sh
 The script handles everything automatically:
 
 1. Installs worker dependencies if not already installed
-2. Copies example files into `setup/` if any are missing, so you can edit them
+2. Copies the example profile files into `setup/profile/` if the folder is empty, so you can edit them
 3. Checks Cloudflare authentication and tells you what to do if not connected
-4. Checks that LLM_API_KEY and WIDGET_TOKEN are set and guides you if not
-5. Reads all `.md` files from `setup/` and combines them into your profile
+4. Checks that `LLM_API_KEY` is set, and creates the widget token (`WIDGET_TOKEN`) for you
+5. Reads all `.md` files from `setup/profile/` and combines them into your profile
 6. Uploads your profile and config to Cloudflare as encrypted secrets (they never go into git)
-7. Deploys the worker to Cloudflare's global network
+7. Deploys the chat worker, and the widget worker that hosts `widget.js` and a standalone chat page
 
-When it finishes, look for a line in the output like this:
+The worker names come from `worker/wrangler.toml` (`portfolio-chatbot-worker`) and `widget-worker/wrangler.toml` (`portfolio-chatbot-widget`). They become part of your URLs, for example `https://portfolio-chatbot-worker.YOUR-ACCOUNT.workers.dev`. If you want different names, change them before your first deploy: renaming later changes the URLs and breaks existing embeds.
 
-```
-https://portfolio-chatbot-worker.YOUR-NAME.workers.dev
-```
-
-Copy that URL. You need it in the next step.
+The widget token is saved in `setup/config.json`. If you already set `WIDGET_TOKEN` yourself, the script asks you to paste it instead of replacing it.
 
 **Updating later:** whenever you edit files in `setup/`, run `bash scripts/build-and-deploy.sh` again. The worker is updated live within about 30 seconds.
 
 
-## Step 7: Host the widget file
+## Step 6: Add the widget to your website
 
-The chat widget is a single JavaScript file: `widget/widget.js`. Your visitors' browsers download it when your page loads, so it needs to be publicly accessible.
-
-**Cloudflare Pages: free and simplest:**
-
-1. Go to dash.cloudflare.com
-2. Click Workers and Pages, then Create, then Pages, then Upload assets
-3. Give the project a name: for example `my-widget`
-4. Upload only the `widget/widget.js` file from this project
-5. Click Deploy
-
-You get a URL like `https://my-widget.pages.dev/widget.js`. Copy it. To verify it works, open the URL in a browser: you should see JavaScript source code.
-
-You can also place `widget.js` in your own website's static files folder if you have one, and link to it from there.
-
-
-## Step 8: Add the widget to your website
-
-Open any HTML page on your website. Find the `</body>` tag near the bottom of the file. Paste this snippet immediately before it:
+When the deploy finishes, open `setup/embed.html` in a browser. It has the exact snippet for your site, with your URLs and token filled in. It looks like this:
 
 ```html
-<script
-  src="WIDGET_JS_URL"
-  data-worker="WORKER_URL"
-  data-token="YOUR_WIDGET_TOKEN"
-  data-name="Sarah's Bot"
-  data-accent="#0055ff"
-  data-welcome="Hi! Ask me anything about my work."
-></script>
+<script src="https://portfolio-chatbot-widget.YOUR-ACCOUNT.workers.dev/widget.js"
+        data-worker="https://portfolio-chatbot-worker.YOUR-ACCOUNT.workers.dev"
+        data-token="YOUR_WIDGET_TOKEN"
+        defer></script>
 ```
 
-Replace each placeholder:
+Paste it just before the `</body>` tag of your pages and publish your website. The widget appears as a floating button in the bottom-right corner of the page.
 
-| Placeholder | What to use |
+The name, welcome message, accent colour and suggested questions come from `setup/config.json`. You can also override them on the script tag:
+
+| Attribute | What it does |
 |---|---|
-| `WIDGET_JS_URL` | URL from Step 7, e.g. `https://my-widget.pages.dev/widget.js` |
-| `WORKER_URL` | URL from Step 6, e.g. `https://portfolio-chatbot-worker.YOUR-NAME.workers.dev` |
-| `YOUR_WIDGET_TOKEN` | The token you created in Step 4 |
 | `data-name` | Name displayed in the chat header |
-| `data-accent` | Accent colour as a hex code |
+| `data-accent` | Accent colour, for example `#0055ff` |
 | `data-welcome` | First message visitors see when they open the widget |
-
-Save the file and publish your website. The widget appears as a floating button in the bottom-right corner of the page.
 
 
 ## Getting an API key
@@ -208,7 +176,7 @@ Both work equally well for this use case. If you are not sure, start with OpenAI
 
 ## Profile files
 
-All files in `setup/` are gitignored: they stay on your machine and are never committed. See `setup/examples/` for filled-in examples using a fictional persona.
+Profile files live in `setup/profile/`. Everything in `setup/` except `setup/examples/` is gitignored: it stays on your machine and is never committed. See `setup/examples/` for filled-in examples using a fictional persona.
 
 | File | What to write |
 |---|---|
@@ -219,7 +187,7 @@ All files in `setup/` are gitignored: they stay on your machine and are never co
 | `faq.md` | Questions you get asked often, pre-answered |
 | `boundaries.md` | Topics the bot must never claim or discuss |
 
-Any additional `.md` files you add to `setup/` are included automatically on the next deploy.
+Any additional `.md` files you add to `setup/profile/` are included automatically on the next deploy. Non-English text and large profiles are fine: the profile is uploaded in as many pieces as it needs.
 
 
 ## All configuration options
@@ -263,17 +231,10 @@ All optional. Only the methods you configure get shown as buttons.
 
 | Field | Default | Description |
 |---|---|---|
-| `security.allowedOrigins` | `[]` | Domains allowed to use your worker. Empty means no restriction: not recommended. |
-| `security.rateLimitRpm` | `10` | Max requests per visitor per minute |
-| `security.maxMessageLength` | `500` | Max characters in a visitor message |
-| `security.maxSessionMessages` | `20` | Max messages per visitor per session |
-
-**Lead capture**
-
-| Field | Default | Description |
-|---|---|---|
-| `leadCapture.enabled` | `false` | Whether to prompt visitors to leave contact details |
-| `leadCapture.trigger` | `"on_intent"` | When to prompt: `on_intent` activates when interest is detected |
+| `security.allowedOrigins` | `[]` | Websites allowed to use your worker, e.g. `https://yoursite.com`. Empty means every website: not recommended when live. When the list is not empty, the deploy script adds the widget's standalone page to it. |
+| `security.rateLimitRpm` | `10` | Max requests per visitor per minute (approximate, see [Security model](#security-model)) |
+| `security.maxMessageLength` | `500` | Max characters in a visitor message. The widget uses the same limit. |
+| `security.maxSessionMessages` | `20` | Max history messages the widget may send with one request |
 
 **Widget appearance**
 
@@ -286,31 +247,29 @@ All optional. Only the methods you configure get shown as buttons.
 
 ## Local development
 
-Start the worker locally:
+1. Put your API key in `worker/.dev.vars` (this file is gitignored):
 
-```bash
-cd worker && npm run dev
-```
+   ```
+   LLM_API_KEY=your-key
+   ```
 
-The worker runs at `http://localhost:8787`. Open `widget/index.html` in a browser to test the widget against it.
+2. Start the worker with your real `setup/` files:
 
-To test with your real `setup/` files locally:
+   ```bash
+   bash scripts/dev.sh
+   ```
 
-```bash
-export BOT_CONFIG_JSON="$(cat setup/config.json)"
-export PROFILE_TEXT="$(cat setup/*.md 2>/dev/null)"
-cd worker && npm run dev
-```
+3. Open `widget/dev.html` in a browser. It talks to the worker at `http://localhost:8787`.
 
-When running locally, the widget token and origin checks are skipped if the secrets are not set: so you can test freely without configuring them.
+Locally, the widget token and origin checks are off, so you can test freely. Use `bash scripts/dev.sh --port 8788` if port 8787 is taken.
 
 
 ## Security model
 
 * All secrets are encrypted Cloudflare Worker secrets: never in source code or git history
-* `WIDGET_TOKEN` blocks direct API calls that do not come from your widget
-* `allowedOrigins` blocks browser requests from domains other than yours
-* Every visitor message is validated before reaching the AI: size, injection patterns, topic keywords
+* `WIDGET_TOKEN` and `allowedOrigins` stop other websites from embedding your bot. They do not stop a determined person: the token is visible in your page source, and scripts outside a browser can send any `Origin` header
+* A per-visitor rate limit slows down abuse. It is kept in memory on each Cloudflare instance, so it is approximate, and there is no overall spending cap. Set a monthly budget limit with your AI provider as the real cost guard
+* Every visitor message, and the chat history the browser sends with it, is checked before reaching the AI: size, injection patterns, topic keywords
 * The system prompt enforces strict context boundaries as a second layer
 * Replies are sanitised and length-capped before being sent back to the visitor
 * Conversation history is in memory only: never logged, never persisted
@@ -319,7 +278,7 @@ When running locally, the widget token and origin checks are skipped if the secr
 ## Cost
 
 * Cloudflare Workers free tier: 100,000 requests per day
-* Cloudflare Pages: free for hosting `widget.js`
+* The widget worker that hosts `widget.js` is covered by the same free tier
 * OpenAI gpt-4o-mini: roughly $0.01 per 1,000 messages
 * Anthropic claude-haiku: similar cost range
 
@@ -333,8 +292,7 @@ portfolio-chatbot/
   setup/
     examples/       filled-in example files (fictional persona, safe to share)
     config.json     your config (gitignored)
-    about.md        your profile files (gitignored)
-    ...
+    profile/        your profile .md files (gitignored)
   worker/
     src/
       index.js      routing, LLM calls, CTA logic
@@ -345,8 +303,13 @@ portfolio-chatbot/
     wrangler.toml
   widget/
     widget.js       the embeddable chat widget (Shadow DOM, no dependencies)
-    index.html      local dev test page
+    dev.html        local test page
+    index.html      standalone chat page (generated at deploy, gitignored)
+  widget-worker/
+    wrangler.toml   hosts widget.js and the standalone page on Cloudflare
   scripts/
-    build-and-deploy.sh
+    setup.sh              setup wizard
+    build-and-deploy.sh   deploy to Cloudflare
+    dev.sh                run the worker locally
   README.md
 ```

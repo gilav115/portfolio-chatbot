@@ -3,6 +3,8 @@ name: CI
 on:
   pull_request:
     branches: ['**']
+  push:
+    branches: [main]
 
 jobs:
   test:
@@ -36,3 +38,6 @@ jobs:
 
       - name: Check build-and-deploy.sh
         run: bash -n scripts/build-and-deploy.sh
+
+      - name: Check dev.sh
+        run: bash -n scripts/dev.sh
