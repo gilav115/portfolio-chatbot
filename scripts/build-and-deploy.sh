@@ -14,6 +14,7 @@ export ROOT
 SETUP_DIR="$ROOT/setup"
 PROFILE_DIR="$SETUP_DIR/profile"
 CONFIG_FILE="$SETUP_DIR/config.json"
+export CONFIG_FILE
 WORKER_DIR="$ROOT/worker"
 WIDGET_WORKER_DIR="$ROOT/widget-worker"
 WRANGLER="$WORKER_DIR/node_modules/.bin/wrangler"
@@ -26,6 +27,59 @@ info() { echo "  info     $*"; }
 warn() { echo "  warn     $*"; }
 fail() { echo ""; echo "  ERROR    $*"; echo ""; exit 1; }
 step() { echo ""; echo "Step $*"; }
+indent() { grep -v "^$" | sed 's/^/           /' || true; }
+
+# Reads a dot-separated key from setup/config.json. Prints DEFAULT when missing.
+# The path is passed through the environment, so any folder name works.
+cfg_get() {
+  KEY="$1" DEFAULT="${2:-}" python3 -c "
+import json, os
+try:
+    v = json.load(open(os.environ['CONFIG_FILE']))
+    for part in os.environ['KEY'].split('.'):
+        v = v.get(part) if isinstance(v, dict) else None
+    print(os.environ['DEFAULT'] if v is None else v)
+except Exception:
+    print(os.environ['DEFAULT'])
+" 2>/dev/null || echo "${2:-}"
+}
+
+# Sets a dot-separated key in setup/config.json to a string value.
+cfg_set() {
+  KEY="$1" VALUE="$2" python3 -c "
+import json, os
+path = os.environ['CONFIG_FILE']
+c = json.load(open(path))
+obj = c
+parts = os.environ['KEY'].split('.')
+for part in parts[:-1]:
+    obj = obj.setdefault(part, {})
+obj[parts[-1]] = os.environ['VALUE']
+with open(path, 'w') as f:
+    json.dump(c, f, indent=2)
+    f.write('\n')
+"
+}
+
+# Runs a wrangler command, prints its output, and returns its exit status.
+# Output is kept in WRANGLER_OUT. Safe under set -e: a failure is returned, not fatal.
+run_wrangler() {
+  local status=0
+  WRANGLER_OUT="$("$WRANGLER" "$@" 2>&1)" || status=$?
+  echo "$WRANGLER_OUT" | indent
+  if [ "$status" -eq 0 ] && echo "$WRANGLER_OUT" | grep -q "\[ERROR\]"; then status=1; fi
+  return "$status"
+}
+
+# Stores stdin as a Cloudflare secret. Stops the script with a clear message on failure.
+put_secret() {
+  local name="$1" status=0
+  WRANGLER_OUT="$("$WRANGLER" secret put "$name" 2>&1)" || status=$?
+  echo "$WRANGLER_OUT" | indent
+  if [ "$status" -ne 0 ] || echo "$WRANGLER_OUT" | grep -q "\[ERROR\]"; then
+    fail "Could not store the $name secret in Cloudflare. See the output above."
+  fi
+}
 
 # ── Header ───────────────────────────────────────────────────────────────────
 
@@ -39,13 +93,13 @@ step "1 of 7   Dependencies"
 # ════════════════════════════════════════════════════════════════════════════
 
 if ! command -v node &>/dev/null; then
-  fail "Node.js is not installed. Install it from nodejs.org (version 18 or newer), then run this script again."
+  fail "Node.js is not installed. Install it from nodejs.org (version 22 or newer), then run this script again."
 fi
 
 NODE_VERSION="$(node --version)"
 NODE_MAJOR="$(echo "$NODE_VERSION" | sed 's/v\([0-9]*\).*/\1/')"
-if [ "$NODE_MAJOR" -lt 18 ]; then
-  fail "Node.js $NODE_VERSION is too old. Version 18 or newer is required. Update at nodejs.org, then run this script again."
+if [ "$NODE_MAJOR" -lt 22 ]; then
+  fail "Node.js $NODE_VERSION is too old. Version 22 or newer is required. Update at nodejs.org, then run this script again."
 fi
 ok "Node.js $NODE_VERSION"
 
@@ -73,20 +127,32 @@ if [ ! -f "$CONFIG_FILE" ]; then
 fi
 
 # Validate setup/config.json is valid JSON before doing anything else
-if ! python3 -c "import json,sys; json.load(open('$CONFIG_FILE'))" 2>/dev/null; then
+if ! python3 -c "import json, os; json.load(open(os.environ['CONFIG_FILE']))" 2>/dev/null; then
   fail "setup/config.json is not valid JSON. Fix the syntax error and run this script again."
 fi
 ok "setup/config.json is valid JSON."
 
 # Warn if config still has obvious placeholder values
-OWNER_NAME="$(python3 -c "import json; c=json.load(open('$CONFIG_FILE')); print(c.get('ownerName',''))" 2>/dev/null || echo '')"
-BOT_NAME_VAL="$(python3 -c "import json; c=json.load(open('$CONFIG_FILE')); print(c.get('botName',''))" 2>/dev/null || echo '')"
-if [ "$OWNER_NAME" = "the professional" ] || [ "$OWNER_NAME" = "Alex Chen" ] || [ -z "$OWNER_NAME" ]; then
-  warn "ownerName in setup/config.json still looks like a placeholder (\"$OWNER_NAME\"). Update it with your real name."
-fi
-if [ "$BOT_NAME_VAL" = "Assistant" ] || [ "$BOT_NAME_VAL" = "Alex's Bot" ] || [ -z "$BOT_NAME_VAL" ]; then
-  warn "botName in setup/config.json still looks like a placeholder (\"$BOT_NAME_VAL\"). Update it."
-fi
+OWNER_NAME="$(cfg_get ownerName)"
+BOT_NAME_VAL="$(cfg_get botName)"
+case "$OWNER_NAME" in
+  ""|"the professional"|"Alex Chen"|YOUR_*)
+    warn "ownerName in setup/config.json still looks like a placeholder (\"$OWNER_NAME\"). Update it with your real name." ;;
+esac
+case "$BOT_NAME_VAL" in
+  ""|"Assistant"|"Alex's Bot"|YOUR_*)
+    warn "botName in setup/config.json still looks like a placeholder (\"$BOT_NAME_VAL\"). Update it." ;;
+esac
+# Example contact details and origins from setup/examples/config.json.
+python3 -c "
+import json, os
+c = json.load(open(os.environ['CONFIG_FILE']))
+values = [str(v) for k, v in (c.get('contactMethods') or {}).items() if not k.startswith('_') and isinstance(v, (str, int))]
+values += [str(v) for v in ((c.get('security') or {}).get('allowedOrigins') or [])]
+for v in values:
+    if any(p in v.lower() for p in ('example.com', 'your-website', 'yourdomain', 'yourhandle', 'yourname')):
+        print('  warn     setup/config.json still has the example value \"' + v + '\". Replace or remove it.')
+" 2>/dev/null || true
 
 # Create setup/profile/ from examples if it doesn't exist or has no .md files
 if [ ! -d "$PROFILE_DIR" ] || ! ls "$PROFILE_DIR"/*.md >/dev/null 2>&1; then
@@ -196,48 +262,53 @@ else
   MISSING_SECRETS=1
 fi
 
-CONFIG_TOKEN="$(python3 -c "
-import json
-try:
-    with open('$CONFIG_FILE') as f:
-        c = json.load(f)
-    print(c.get('deployment', {}).get('widgetToken', ''))
-except Exception:
-    print('')
-" 2>/dev/null || echo '')"
+CONFIG_TOKEN="$(cfg_get deployment.widgetToken)"
+
+save_token() {
+  if cfg_set deployment.widgetToken "$1" 2>/dev/null; then
+    ok "WIDGET_TOKEN saved to setup/config.json."
+  else
+    warn "Could not save WIDGET_TOKEN to setup/config.json."
+  fi
+}
 
 if [ "$HAS_WIDGET_TOKEN" -eq 1 ] && [ -n "$CONFIG_TOKEN" ]; then
   ok "WIDGET_TOKEN is set."
-elif [ "$HAS_WIDGET_TOKEN" -eq 1 ] && [ -z "$CONFIG_TOKEN" ]; then
-  info "WIDGET_TOKEN is set in Cloudflare but missing from setup/config.json. Rotating..."
-  NEW_TOKEN="$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")"
-  printf '%s' "$NEW_TOKEN" | "$WRANGLER" secret put WIDGET_TOKEN 2>&1 | grep -v "^$" | sed 's/^/           /'
-  NEW_TOKEN="$NEW_TOKEN" python3 -c "
-import json, os
-with open('$CONFIG_FILE') as f:
-    c = json.load(f)
-c.setdefault('deployment', {})['widgetToken'] = os.environ['NEW_TOKEN']
-with open('$CONFIG_FILE', 'w') as f:
-    json.dump(c, f, indent=2)
-    f.write('\n')
-" 2>/dev/null && ok "WIDGET_TOKEN rotated and saved to setup/config.json." || warn "Could not save WIDGET_TOKEN to config.json."
+elif [ "$HAS_WIDGET_TOKEN" -eq 1 ]; then
+  # A token exists in Cloudflare (for example set by hand with wrangler secret put),
+  # but this machine does not know its value. Cloudflare cannot show it back, so ask.
+  # Replacing it silently would break every website that already uses it.
+  echo ""
+  echo "  WIDGET_TOKEN is set in Cloudflare, but setup/config.json does not have its value."
+  echo "  Paste the token you set, so the generated pages can use it."
+  echo "  Press Enter to create a new token instead. Websites that use the old token"
+  echo "  will then need the new one."
+  echo ""
+  TOKEN_INPUT=""
+  if [ -t 0 ]; then
+    printf "  Token (input will not echo): "
+    IFS= read -rs TOKEN_INPUT || TOKEN_INPUT=""
+    echo ""
+  fi
+  if [ -n "$TOKEN_INPUT" ]; then
+    printf '%s' "$TOKEN_INPUT" | put_secret WIDGET_TOKEN
+    save_token "$TOKEN_INPUT"
+  else
+    info "Creating a new WIDGET_TOKEN..."
+    NEW_TOKEN="$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")"
+    printf '%s' "$NEW_TOKEN" | put_secret WIDGET_TOKEN
+    save_token "$NEW_TOKEN"
+    warn "WIDGET_TOKEN was replaced. Update data-token on any website that embeds the widget."
+  fi
 elif [ -n "$CONFIG_TOKEN" ]; then
   info "Restoring WIDGET_TOKEN from setup/config.json..."
-  printf '%s' "$CONFIG_TOKEN" | "$WRANGLER" secret put WIDGET_TOKEN 2>&1 | grep -v "^$" | sed 's/^/           /'
+  printf '%s' "$CONFIG_TOKEN" | put_secret WIDGET_TOKEN
   ok "WIDGET_TOKEN restored."
 else
   info "Generating WIDGET_TOKEN..."
   NEW_TOKEN="$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")"
-  printf '%s' "$NEW_TOKEN" | "$WRANGLER" secret put WIDGET_TOKEN 2>&1 | grep -v "^$" | sed 's/^/           /'
-  NEW_TOKEN="$NEW_TOKEN" python3 -c "
-import json, os
-with open('$CONFIG_FILE') as f:
-    c = json.load(f)
-c.setdefault('deployment', {})['widgetToken'] = os.environ['NEW_TOKEN']
-with open('$CONFIG_FILE', 'w') as f:
-    json.dump(c, f, indent=2)
-    f.write('\n')
-" 2>/dev/null && ok "WIDGET_TOKEN generated and saved to setup/config.json." || warn "WIDGET_TOKEN generated but could not save to config.json."
+  printf '%s' "$NEW_TOKEN" | put_secret WIDGET_TOKEN
+  save_token "$NEW_TOKEN"
 fi
 
 if [ "$MISSING_SECRETS" -eq 1 ]; then
@@ -249,41 +320,57 @@ fi
 step "5 of 7   Uploading profile and config"
 # ════════════════════════════════════════════════════════════════════════════
 
-BOT_CONFIG="$(cat "$CONFIG_FILE")"
-
 info "Uploading config to Cloudflare..."
-printf '%s' "$BOT_CONFIG" | "$WRANGLER" secret put BOT_CONFIG_JSON 2>&1 | grep -v "^$" | sed 's/^/           /' || true
+put_secret BOT_CONFIG_JSON < "$CONFIG_FILE"
 ok "Config uploaded."
 
-info "Uploading profile text to Cloudflare..."
-if [ -z "$PROFILE_TEXT" ]; then
-  warn "No profile content to upload."
-else
-  CHUNK_SIZE=4000
-  PROFILE_LEN=${#PROFILE_TEXT}
-  CHUNK_NUM=0
-  CHUNK_OFFSET=0
-  while [ "$CHUNK_OFFSET" -lt "$PROFILE_LEN" ]; do
-    CHUNK_NUM=$((CHUNK_NUM + 1))
-    CHUNK="${PROFILE_TEXT:$CHUNK_OFFSET:$CHUNK_SIZE}"
-    UPLOAD_OUT="$(printf '%s' "$CHUNK" | "$WRANGLER" secret put "PROFILE_TEXT_$CHUNK_NUM" 2>&1)"
-    echo "$UPLOAD_OUT" | grep -v "^$" | sed 's/^/           /'
-    if echo "$UPLOAD_OUT" | grep -q "\[ERROR\]"; then
-      fail "Failed to upload profile chunk $CHUNK_NUM. See output above."
-    fi
-    CHUNK_OFFSET=$((CHUNK_OFFSET + CHUNK_SIZE))
-  done
-  ok "Profile uploaded ($CHUNK_NUM chunk(s), $PROFILE_CHARS characters)."
+# Cloudflare limits each secret to 5 KB. The limit counts bytes, and non-English
+# text or emoji take 2 to 4 bytes per character, so split by bytes, never inside
+# a character. The worker reads PROFILE_TEXT_1, PROFILE_TEXT_2, ... until one is missing.
+CHUNK_DIR="$(mktemp -d)"
+trap 'rm -rf "$CHUNK_DIR"' EXIT
+export CHUNK_DIR
+printf '%s' "$PROFILE_TEXT" | python3 -c "
+import os, sys
+data = sys.stdin.buffer.read().decode('utf-8')
+limit, chunks, current, size = 4000, [], [], 0
+for ch in data:
+    n = len(ch.encode('utf-8'))
+    if size + n > limit:
+        chunks.append(''.join(current)); current, size = [], 0
+    current.append(ch); size += n
+if current:
+    chunks.append(''.join(current))
+for i, chunk in enumerate(chunks, 1):
+    with open(os.path.join(os.environ['CHUNK_DIR'], str(i)), 'w', encoding='utf-8') as f:
+        f.write(chunk)
+print(len(chunks))
+" > "$CHUNK_DIR/count"
+CHUNK_NUM="$(cat "$CHUNK_DIR/count")"
 
-  # Delete any leftover chunks from a previous larger profile.
-  # Without this, shrinking a profile leaves old secrets that get appended to the prompt.
-  for _i in $(seq $(( CHUNK_NUM + 1 )) 10); do
-    if echo "$SECRET_LIST" | grep -q "PROFILE_TEXT_$_i"; then
-      printf 'y\n' | "$WRANGLER" secret delete "PROFILE_TEXT_$_i" 2>&1 | grep -v "^$" | sed 's/^/           /' || true
-      ok "Removed stale profile chunk PROFILE_TEXT_$_i"
-    fi
+if [ "$CHUNK_NUM" -eq 0 ]; then
+  warn "No profile content to upload. Any old profile in Cloudflare is removed below,"
+  warn "so the bot will say its profile is being set up."
+else
+  info "Uploading profile text to Cloudflare..."
+  for _i in $(seq 1 "$CHUNK_NUM"); do
+    put_secret "PROFILE_TEXT_$_i" < "$CHUNK_DIR/$_i"
   done
+  ok "Profile uploaded ($CHUNK_NUM piece(s), $PROFILE_CHARS characters)."
 fi
+
+# Delete leftover pieces from an earlier, larger profile (and the old single-secret
+# PROFILE_TEXT). Without this, shrinking or emptying the profile leaves old text live.
+for _name in $(echo "$SECRET_LIST" | grep -oE 'PROFILE_TEXT(_[0-9]+)?' | sort -u); do
+  _n="${_name#PROFILE_TEXT_}"
+  if [ "$_name" = "PROFILE_TEXT" ] || [ "$_n" -gt "$CHUNK_NUM" ]; then
+    if run_wrangler secret delete "$_name" <<< "y"; then
+      ok "Removed old profile piece $_name"
+    else
+      warn "Could not remove $_name. Remove it with: cd worker && npx wrangler secret delete $_name"
+    fi
+  fi
+done
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -291,25 +378,15 @@ step "6 of 7   Deploying chat worker"
 # ════════════════════════════════════════════════════════════════════════════
 
 info "Running wrangler deploy..."
-DEPLOY_OUTPUT="$("$WRANGLER" deploy 2>&1)"
-echo "$DEPLOY_OUTPUT" | grep -v "^$" | sed 's/^/           /'
-
-if echo "$DEPLOY_OUTPUT" | grep -qi "\[ERROR\]\|Error:"; then
+if ! run_wrangler deploy; then
   fail "Chat worker deployment failed. See output above."
 fi
+DEPLOY_OUTPUT="$WRANGLER_OUT"
 
 WORKER_URL="$(echo "$DEPLOY_OUTPUT" | grep -oE 'https://[a-zA-Z0-9._-]+\.workers\.dev' | head -1 || echo '')"
 
-if [ -n "$WORKER_URL" ] && [ -f "$CONFIG_FILE" ]; then
-  python3 -c "
-import json, os
-with open('$CONFIG_FILE') as f:
-    c = json.load(f)
-c.setdefault('deployment', {})['workerUrl'] = '$WORKER_URL'
-with open('$CONFIG_FILE', 'w') as f:
-    json.dump(c, f, indent=2)
-    f.write('\n')
-" 2>/dev/null && ok "Worker URL saved to setup/config.json." || true
+if [ -n "$WORKER_URL" ]; then
+  cfg_set deployment.workerUrl "$WORKER_URL" 2>/dev/null && ok "Worker URL saved to setup/config.json." || true
 fi
 ok "Chat worker deployed: ${WORKER_URL:-see output above}"
 
@@ -318,21 +395,11 @@ ok "Chat worker deployed: ${WORKER_URL:-see output above}"
 step "7 of 7   Deploying widget"
 # ════════════════════════════════════════════════════════════════════════════
 
+[ -n "$WORKER_URL" ] || WORKER_URL="$(cfg_get deployment.workerUrl)"
+
 # Derive the account subdomain from the chat worker URL so we can predict the widget URL.
 # e.g. from https://portfolio-chatbot-worker.your-account.workers.dev -> your-account
-CF_ACCOUNT_SUBDOMAIN="$(echo "${WORKER_URL:-}" | sed 's|https://[^.]*\.\([^.]*\)\.workers\.dev.*|\1|')"
-if [ -z "$CF_ACCOUNT_SUBDOMAIN" ]; then
-  CF_ACCOUNT_SUBDOMAIN="$(python3 -c "
-import json
-try:
-    c = json.load(open('$CONFIG_FILE'))
-    url = c.get('deployment',{}).get('workerUrl','')
-    parts = url.replace('https://','').split('.')
-    print(parts[1] if len(parts) > 2 else '')
-except Exception:
-    print('')
-" 2>/dev/null || echo '')"
-fi
+CF_ACCOUNT_SUBDOMAIN="$(echo "${WORKER_URL:-}" | sed -n 's|https://[^.]*\.\([^.]*\)\.workers\.dev.*|\1|p')"
 
 WIDGET_WORKER_NAME="$(grep '^name' "$WIDGET_WORKER_DIR/wrangler.toml" | head -1 | sed 's/name[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/' | tr -d ' ')"
 [ -z "$WIDGET_WORKER_NAME" ] && WIDGET_WORKER_NAME="portfolio-chatbot-widget"
@@ -343,11 +410,11 @@ if [ -n "$CF_ACCOUNT_SUBDOMAIN" ]; then
 fi
 
 # Read config values needed to generate a working widget/index.html
-WIDGET_BOT_NAME="$(python3 -c "import json; c=json.load(open('$CONFIG_FILE')); print(c.get('botName','Assistant'))" 2>/dev/null || echo 'Assistant')"
-WIDGET_ACCENT="$(python3 -c "import json; c=json.load(open('$CONFIG_FILE')); print(c.get('ui',{}).get('accentColor','#0055ff'))" 2>/dev/null || echo '#0055ff')"
-WIDGET_WELCOME="$(python3 -c "import json; c=json.load(open('$CONFIG_FILE')); print(c.get('ui',{}).get('welcomeMessage','Hi! Ask me anything.'))" 2>/dev/null || echo 'Hi! Ask me anything.')"
-WIDGET_TOKEN_CFG="$(python3 -c "import json; c=json.load(open('$CONFIG_FILE')); print(c.get('deployment',{}).get('widgetToken',''))" 2>/dev/null || echo '')"
-WIDGET_CHAT_URL="${WORKER_URL:-$(python3 -c "import json; c=json.load(open('$CONFIG_FILE')); print(c.get('deployment',{}).get('workerUrl',''))" 2>/dev/null || echo '')}"
+WIDGET_BOT_NAME="$(cfg_get botName Assistant)"
+WIDGET_ACCENT="$(cfg_get ui.accentColor '#0055ff')"
+WIDGET_WELCOME="$(cfg_get ui.welcomeMessage 'Hi! Ask me anything.')"
+WIDGET_TOKEN_CFG="$(cfg_get deployment.widgetToken)"
+WIDGET_CHAT_URL="${WORKER_URL:-}"
 
 export WIDGET_BOT_NAME WIDGET_ACCENT WIDGET_WELCOME WIDGET_TOKEN_CFG WIDGET_CHAT_URL
 
@@ -356,13 +423,17 @@ export WIDGET_BOT_NAME WIDGET_ACCENT WIDGET_WELCOME WIDGET_TOKEN_CFG WIDGET_CHAT
 info "Generating production widget/index.html..."
 python3 - <<'PYEOF'
 import os
+from html import escape
+
+def attr(name):
+    return escape(os.environ.get(name, ''), quote=True)
 
 root       = os.environ['ROOT']
-bot_name   = os.environ.get('WIDGET_BOT_NAME', 'Assistant')
-accent     = os.environ.get('WIDGET_ACCENT', '#0055ff')
-welcome    = os.environ.get('WIDGET_WELCOME', 'Hi! Ask me anything.')
-token      = os.environ.get('WIDGET_TOKEN_CFG', '')
-worker_url = os.environ.get('WIDGET_CHAT_URL', '')
+bot_name   = attr('WIDGET_BOT_NAME') or 'Assistant'
+accent     = attr('WIDGET_ACCENT') or '#0055ff'
+welcome    = attr('WIDGET_WELCOME') or 'Hi! Ask me anything.'
+token      = attr('WIDGET_TOKEN_CFG')
+worker_url = attr('WIDGET_CHAT_URL')
 
 token_attr  = f'\n  data-token="{token}"'   if token      else ''
 worker_attr = f'\n  data-worker="{worker_url}"' if worker_url else ''
@@ -388,7 +459,7 @@ html = f"""<!DOCTYPE html>
 </html>
 """
 
-with open(f'{root}/widget/index.html', 'w') as f:
+with open(os.path.join(root, 'widget', 'index.html'), 'w') as f:
     f.write(html)
 PYEOF
 ok "widget/index.html generated."
@@ -398,23 +469,18 @@ ok "widget/index.html generated."
 #   /            the standalone chat page
 #   /widget.js   the embeddable script for any website
 info "Deploying widget worker (this serves the standalone chat page and widget.js)..."
-WIDGET_DEPLOY_OUTPUT=""
-WIDGET_DEPLOY_FAILED=0
+WIDGET_DEPLOY_FAILED=1
 for ATTEMPT in 1 2; do
-  WIDGET_DEPLOY_OUTPUT="$("$WRANGLER" deploy --config "$WIDGET_WORKER_DIR/wrangler.toml" 2>&1)"
-  if echo "$WIDGET_DEPLOY_OUTPUT" | grep -qi "\[ERROR\]\|Error:"; then
-    if [ "$ATTEMPT" -eq 1 ]; then
-      warn "Widget deploy attempt 1 failed. Retrying..."
-      sleep 3
-    else
-      WIDGET_DEPLOY_FAILED=1
-    fi
-  else
+  if run_wrangler deploy --config "$WIDGET_WORKER_DIR/wrangler.toml"; then
+    WIDGET_DEPLOY_FAILED=0
     break
   fi
+  if [ "$ATTEMPT" -eq 1 ]; then
+    warn "Widget deploy attempt 1 failed. Retrying..."
+    sleep 3
+  fi
 done
-
-echo "$WIDGET_DEPLOY_OUTPUT" | grep -v "^$" | sed 's/^/           /'
+WIDGET_DEPLOY_OUTPUT="$WRANGLER_OUT"
 
 WIDGET_URL=""
 if [ "$WIDGET_DEPLOY_FAILED" -eq 0 ]; then
@@ -422,15 +488,7 @@ if [ "$WIDGET_DEPLOY_FAILED" -eq 0 ]; then
   [ -z "$WIDGET_URL" ] && WIDGET_URL="${WIDGET_URL_EXPECTED:-}"
   if [ -n "$WIDGET_URL" ]; then
     ok "Widget deployed at: $WIDGET_URL"
-    python3 -c "
-import json
-with open('$CONFIG_FILE') as f:
-    c = json.load(f)
-c.setdefault('deployment', {})['widgetUrl'] = '$WIDGET_URL'
-with open('$CONFIG_FILE', 'w') as f:
-    json.dump(c, f, indent=2)
-    f.write('\n')
-" 2>/dev/null && ok "Widget URL saved to setup/config.json." || true
+    cfg_set deployment.widgetUrl "$WIDGET_URL" 2>/dev/null && ok "Widget URL saved to setup/config.json." || true
   fi
 else
   warn "Widget deployment failed after 2 attempts. The chat worker is still live."
@@ -438,31 +496,44 @@ else
   WIDGET_URL="${WIDGET_URL_EXPECTED:-}"
 fi
 
-# Add the widget URL to security.allowedOrigins so the worker enforces origin checking.
-# User-specified sites are already in config.json; this appends the Cloudflare URL.
+# If you listed your own sites in security.allowedOrigins, origin checks are on,
+# so the widget's standalone page must be on the list too. If the list is empty,
+# every site is allowed: leave it empty rather than switch checks on for one URL.
 if [ -n "$WIDGET_URL" ]; then
-  WIDGET_URL="$WIDGET_URL" python3 -c "
+  export WIDGET_URL
+  ORIGINS_RESULT="$(python3 -c "
 import json, os
-with open('$CONFIG_FILE') as f:
-    c = json.load(f)
-widget_url = os.environ['WIDGET_URL']
-origins = c.setdefault('security', {}).setdefault('allowedOrigins', [])
-if widget_url not in origins:
+path = os.environ['CONFIG_FILE']
+c = json.load(open(path))
+widget_url = os.environ['WIDGET_URL'].rstrip('/').lower()
+origins = (c.get('security') or {}).get('allowedOrigins') or []
+if not origins:
+    print('empty')
+elif widget_url in [str(o).rstrip('/').lower() for o in origins]:
+    print('present')
+else:
     origins.append(widget_url)
-    with open('$CONFIG_FILE', 'w') as f:
+    c.setdefault('security', {})['allowedOrigins'] = origins
+    with open(path, 'w') as f:
         json.dump(c, f, indent=2)
         f.write('\n')
-    print('  ok       ' + widget_url + ' added to allowedOrigins.')
-else:
-    print('  ok       allowedOrigins already includes the widget URL.')
-for o in origins:
-    print('  ok         allowed: ' + o)
-" 2>/dev/null || warn "Could not update allowedOrigins in config.json."
+    print('added')
+" 2>/dev/null || echo 'error')"
 
-  info "Re-uploading config with updated allowedOrigins..."
-  BOT_CONFIG_UPDATED="$(cat "$CONFIG_FILE")"
-  printf '%s' "$BOT_CONFIG_UPDATED" | "$WRANGLER" secret put BOT_CONFIG_JSON 2>&1 | grep -v "^$" | sed 's/^/           /' || true
-  ok "Config re-uploaded. Origin enforcement is now active."
+  case "$ORIGINS_RESULT" in
+    empty)
+      warn "security.allowedOrigins is empty, so any website can use your bot."
+      warn "Add your website address to it in setup/config.json before going live." ;;
+    present)
+      ok "allowedOrigins already includes the widget URL." ;;
+    added)
+      ok "$WIDGET_URL added to allowedOrigins."
+      info "Re-uploading config with updated allowedOrigins..."
+      put_secret BOT_CONFIG_JSON < "$CONFIG_FILE"
+      ok "Config re-uploaded." ;;
+    *)
+      warn "Could not update allowedOrigins in setup/config.json." ;;
+  esac
 fi
 
 
@@ -470,14 +541,15 @@ fi
 # Final output — generate setup/embed.html and print summary
 # ════════════════════════════════════════════════════════════════════════════
 
-FINAL_WORKER_URL="$(python3 -c "import json; c=json.load(open('$CONFIG_FILE')); print(c.get('deployment',{}).get('workerUrl',''))" 2>/dev/null || echo "${WORKER_URL:-}")"
-FINAL_WIDGET_URL="$(python3 -c "import json; c=json.load(open('$CONFIG_FILE')); print(c.get('deployment',{}).get('widgetUrl',''))" 2>/dev/null || echo "${WIDGET_URL:-}")"
-FINAL_TOKEN="$(python3 -c "import json; c=json.load(open('$CONFIG_FILE')); print(c.get('deployment',{}).get('widgetToken',''))" 2>/dev/null || echo '')"
+FINAL_WORKER_URL="$(cfg_get deployment.workerUrl "${WORKER_URL:-}")"
+FINAL_WIDGET_URL="$(cfg_get deployment.widgetUrl "${WIDGET_URL:-}")"
+FINAL_TOKEN="$(cfg_get deployment.widgetToken)"
 
 export FINAL_WORKER_URL FINAL_WIDGET_URL FINAL_TOKEN CONFIG_FILE
 
 python3 - <<'PYEOF'
 import os, datetime
+from html import escape
 
 root        = os.environ['ROOT']
 config_file = os.environ['CONFIG_FILE']
@@ -525,8 +597,8 @@ embed_html = f"""<!DOCTYPE html>
 <!-- this token to appear in your website's HTML source code (anyone who      -->
 <!-- embeds the widget will have it visible). However, do NOT commit this     -->
 <!-- file to a public repository, and do not share the token outside of       -->
-<!-- embed contexts. If you suspect abuse, re-run the deploy script to rotate -->
-<!-- the token automatically.                                                 -->
+<!-- embed contexts. To replace the token, remove deployment.widgetToken from -->
+<!-- setup/config.json, run the deploy script, and press Enter when asked.    -->
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -548,31 +620,31 @@ embed_html = f"""<!DOCTYPE html>
   <p class="meta">Generated: {generated}</p>
 
   <h2>Deployment</h2>
-  <pre>Chat worker : {worker_url}
-Widget host : {widget_url}
-Widget JS   : {widget_js}
-Standalone  : {chat_page}</pre>
+  <pre>Chat worker : {escape(worker_url)}
+Widget host : {escape(widget_url)}
+Widget JS   : {escape(widget_js)}
+Standalone  : {escape(chat_page)}</pre>
 
   <h2>Option 1 — Script tag (recommended for any website)</h2>
   <p>Add before <code>&lt;/body&gt;</code> on any page:</p>
-  <pre>{script_tag}</pre>
+  <pre>{escape(script_tag)}</pre>
 
   <h2>Option 2 — Base44 component</h2>
   <p>Replace your ChatWidget component with:</p>
-  <pre>{base44_component}</pre>
+  <pre>{escape(base44_component)}</pre>
 
   <h2>Option 3 — Standalone page (share or iframe)</h2>
   <p>The standalone chat page can be shared as a direct link, or embedded in a page via iframe:</p>
-  <pre>{iframe_tag}</pre>
+  <pre>{escape(iframe_tag)}</pre>
 
   <div class="warn">
-    <strong>Token security.</strong> The WIDGET_TOKEN (<code>{token}</code>) will be visible
+    <strong>Token security.</strong> The WIDGET_TOKEN (<code>{escape(token)}</code>) will be visible
     in your website's HTML source to anyone who views it. This is expected and unavoidable
     for a browser-embedded widget. What the token provides: it prevents unauthorised scripts
     from hammering your API endpoint. What it does NOT provide: it is not a secret that
     protects against a determined person. Do not commit this file to a public repository.
-    If you suspect abuse, re-run <code>bash scripts/setup.sh</code> (choose Deploy) to rotate
-    the token automatically.
+    To replace the token, remove <code>deployment.widgetToken</code> from <code>setup/config.json</code>,
+    run <code>bash scripts/build-and-deploy.sh</code>, and press Enter when it asks for the token.
   </div>
 </body>
 </html>

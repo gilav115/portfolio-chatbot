@@ -12,7 +12,8 @@
 
 const INJECTION_PATTERNS = [
   /ignore (previous|above|all) instructions/i,
-  /you are now/i,
+  /\byou are now (?:an? )?(?:unrestricted|uncensored|unfiltered|jailbroken|evil|dan\b|in (?:developer|god|dan) mode|a different (?:ai|assistant|bot|model)|a new (?:ai|assistant|bot|model)|no longer)/i,
+  /\bfrom now on,? (?:you are|you will|you must|act|respond)\b/i,
   /forget (everything|all|your instructions)/i,
   /\bsystem prompt\b/i,
   /reveal (your|the) (prompt|instructions|rules|context|knowledge)/i,
@@ -26,6 +27,14 @@ const INJECTION_PATTERNS = [
 
 // In-memory rate limit store (per-isolate lifetime: see wrangler.toml note)
 const rateLimitStore = new Map();
+const RATE_WINDOW_MS = 60_000;
+const RATE_PRUNE_AT  = 5_000; // prune expired entries once the map holds this many IPs
+
+// Origins are compared without a trailing slash and in lower case, because the
+// browser's Origin header never has a trailing slash and is always lower case.
+export function normaliseOrigin(origin) {
+  return String(origin ?? '').trim().replace(/\/+$/, '').toLowerCase();
+}
 
 // Blocks browser requests from domains not in security.allowedOrigins.
 // If allowedOrigins is empty (dev / unconfigured), the check is skipped.
@@ -37,8 +46,8 @@ export function guardOrigin(request, config) {
     console.warn('[guard:origin] No allowedOrigins configured: skipping check.');
     return null;
   }
-  const origin = request.headers.get('Origin') ?? '';
-  if (!allowedOrigins.includes(origin)) {
+  const origin = normaliseOrigin(request.headers.get('Origin'));
+  if (!allowedOrigins.map(normaliseOrigin).includes(origin)) {
     console.warn(`[guard:origin] Rejected: "${origin}"`);
     return 'Origin not permitted.';
   }
@@ -59,15 +68,15 @@ export function guardWidgetToken(request, env) {
   return null;
 }
 
-// Sliding-window rate limit: allows up to security.rateLimitRpm requests per IP per minute.
+// Fixed-window rate limit: allows up to security.rateLimitRpm requests per IP per minute.
 // State is in-memory per Cloudflare isolate: under high traffic multiple isolates may run,
 // so limits are approximate rather than exact. See wrangler.toml for a note on this.
 export function guardRateLimit(ip, config) {
   const limit = config.security?.rateLimitRpm ?? 10;
   const now   = Date.now();
-  const windowMs = 60_000;
+  if (rateLimitStore.size >= RATE_PRUNE_AT) pruneRateLimitStore(now);
   const entry = rateLimitStore.get(ip) ?? { count: 0, windowStart: now };
-  if (now - entry.windowStart > windowMs) {
+  if (now - entry.windowStart > RATE_WINDOW_MS) {
     rateLimitStore.set(ip, { count: 1, windowStart: now });
     return null;
   }
@@ -78,6 +87,30 @@ export function guardRateLimit(ip, config) {
     return 'Too many requests. Please slow down and try again in a minute.';
   }
   return null;
+}
+
+// Shared rate limit, using Cloudflare's rate limiting binding (CHAT_RATE_LIMITER
+// in wrangler.toml). Unlike the in-memory limit above, it is shared by all copies
+// of the worker in a Cloudflare location. If the binding is missing or fails, the
+// request is allowed: the in-memory limit still applies.
+export async function guardSharedRateLimit(env, key) {
+  const limiter = env?.CHAT_RATE_LIMITER;
+  if (!limiter) return null;
+  try {
+    const { success } = await limiter.limit({ key });
+    if (success) return null;
+    console.warn(`[guard:rate] ${key} hit the shared rate limit`);
+    return 'Too many requests. Please slow down and try again in a minute.';
+  } catch (err) {
+    console.error('[guard:rate] Shared rate limiter failed:', err);
+    return null;
+  }
+}
+
+function pruneRateLimitStore(now) {
+  for (const [ip, entry] of rateLimitStore) {
+    if (now - entry.windowStart > RATE_WINDOW_MS) rateLimitStore.delete(ip);
+  }
 }
 
 // Rejects empty messages and messages longer than security.maxMessageLength characters.
@@ -111,12 +144,29 @@ export function guardSessionLength(history, config) {
   return null;
 }
 
+// Assistant turns in the history are checked only for attempts to override the
+// rules. The bot's own real replies can say things like "I can't share my system
+// prompt", and that must not block the rest of the conversation.
+const ASSISTANT_TURN_PATTERNS = [
+  /ignore (previous|above|all) instructions/i,
+  /forget (everything|all|your instructions)/i,
+  /override (your|the) (rules|instructions)/i,
+  /disregard (your|the|previous)/i,
+];
+
 // Blocks common prompt injection attempts: phrases visitors use to try to
 // override the system prompt, extract instructions, or change the bot's identity.
+// Checks the new message and the history, because the browser sends the history
+// and can put anything in it, including made-up "assistant" turns.
 // This is a pre-filter; the system prompt itself also enforces the hierarchy as a second layer.
-export function guardInjection(message) {
-  for (const pattern of INJECTION_PATTERNS) {
-    if (pattern.test(message)) {
+export function guardInjection(message, history = []) {
+  const checks = [[message, INJECTION_PATTERNS]];
+  for (const item of history) {
+    checks.push([item?.content, item?.role === 'assistant' ? ASSISTANT_TURN_PATTERNS : INJECTION_PATTERNS]);
+  }
+  for (const [text, patterns] of checks) {
+    if (typeof text !== 'string') continue;
+    if (patterns.some(pattern => pattern.test(text))) {
       console.warn('[guard:injection] Injection attempt blocked.');
       return 'That kind of message cannot be processed.';
     }
@@ -153,8 +203,9 @@ export function guardTopic(message, config) {
 // Trims at a sentence boundary (. ! ?) to avoid mid-sentence cuts.
 // Returns a safe fallback string if the reply is missing or empty.
 // Hard cap: 1500 characters: well above the maxAnswerWords limit in practice.
-export function guardOutput(reply, ownerName) {
-  const fallback = `I can't answer that from the approved information. You can contact ${ownerName ?? 'me'} directly using the contact buttons below.`;
+// hasContactButtons: only mention buttons when the worker will actually send some.
+export function guardOutput(reply, ownerName, hasContactButtons = true) {
+  const fallback = fallbackReply(ownerName, hasContactButtons);
 
   if (typeof reply !== 'string' || reply.trim().length === 0) return fallback;
 
@@ -170,4 +221,12 @@ export function guardOutput(reply, ownerName) {
   return lastBoundary > MAX_CHARS * 0.5
     ? truncated.slice(0, lastBoundary + 1).trim()
     : truncated.trim() + '...';
+}
+
+// The reply used when the bot cannot answer. Shared with the system prompt so both say the same.
+export function fallbackReply(ownerName, hasContactButtons) {
+  const who = ownerName ?? 'me';
+  return hasContactButtons
+    ? `I can't answer that from the approved information. You can contact ${who} directly using the contact buttons below.`
+    : `I can't answer that from the approved information. Please contact ${who} directly.`;
 }
