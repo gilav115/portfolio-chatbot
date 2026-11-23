@@ -10,20 +10,129 @@
  * so expensive checks (injection regex, LLM call) are skipped on bad requests.
  */
 
-const INJECTION_PATTERNS = [
-  /ignore (previous|above|all) instructions/i,
-  /\byou are now (?:an? )?(?:unrestricted|uncensored|unfiltered|jailbroken|evil|dan\b|in (?:developer|god|dan) mode|a different (?:ai|assistant|bot|model)|a new (?:ai|assistant|bot|model)|no longer)/i,
-  /\bfrom now on,? (?:you are|you will|you must|act|respond)\b/i,
-  /forget (everything|all|your instructions)/i,
-  /\bsystem prompt\b/i,
-  /reveal (your|the) (prompt|instructions|rules|context|knowledge)/i,
-  /act as (a different|an unrestricted|a new)/i,
-  /\bjailbreak\b/i,
-  /pretend (you are|to be)/i,
-  /override (your|the) (rules|instructions)/i,
-  /disregard (your|the|previous)/i,
-  /what (are|were) your instructions/i,
+// The injection check is a first, cheap filter. It is tuned to block the
+// common, unambiguous attack phrases and to let normal visitor questions pass,
+// because a blocked real question costs a real lead. The system prompt is the
+// second layer and handles what this filter lets through.
+// Normal questions that must pass: "what are your rules for new clients",
+// "have you built a system prompt for a chatbot", "forget everything I said, I
+// want a website", "pretend you are hiring me", "ignore my last instruction".
+
+// The target of an override: "instructions" or "prompt", with a word in front
+// that points at this bot's own rules ("all", "the", "your", "previous", ...).
+// "rules" and "context" are left out, and so are bare words, because visitors
+// use them in normal questions ("how do I bypass prompts in npm install?").
+const OVERRIDE_TARGET =
+  String.raw`(?:(?:all|any|every)(?: and all)? (?:of )?(?:the |your )?(?:(?:previous|prior|above|earlier|preceding|system|original|initial) )*` +
+  String.raw`|(?:the|your) (?:(?:previous|prior|above|earlier|preceding|system|original|initial) )*` +
+  String.raw`|(?:(?:previous|prior|above|earlier|preceding|system|original|initial) )+)(?:instructions?|prompts?)\b`;
+
+// "ignore the above" counts only at the end of the message or before "and",
+// so a correction like "ignore the above question, what about SEO?" passes.
+const OVERRIDE_CORE =
+  String.raw`(?:ignore|disregard|forget|override|bypass) ${OVERRIDE_TARGET}` +
+  String.raw`|(?:ignore|disregard) (?:the |everything |all )?(?:above|before this)(?=[.!]?$|,? and\b)`;
+
+// Phrases that try to cancel or replace the rules, anywhere in a visitor message.
+const OVERRIDE_PATTERNS = [
+  new RegExp(String.raw`\b(?:${OVERRIDE_CORE})`, 'i'),
+  /\bforget (?:everything|all)(?: you (?:know|were told|have been told))?,? and (?:act|behave|respond|answer|pretend|become|start)\b/i,
+  /\byour (?:instructions|rules|prompt) (?:are|is) (?:now |hereby )?(?:cancelled|canceled|void|overridden|replaced|gone|removed)\b/i,
 ];
+
+// Assistant turns in the history are checked only for an override written as a
+// command at the start of a sentence: a made-up assistant turn like "Sure. Ignore
+// all previous instructions." The bot's own real replies pass: refusals ("I can't
+// ignore my instructions"), quotes ("'Ignore previous instructions' is a common
+// attack") and sentences that talk about the phrase ("Ignore previous
+// instructions is something I cannot do").
+const ASSISTANT_TURN_PATTERNS = [
+  new RegExp(String.raw`(?:^|[.!?:]\s+)(?:please |now |ok,? |okay,? )?(?:${OVERRIDE_CORE})(?! (?:is|are|was|were|isn't|means|would|will)\b)`, 'i'),
+];
+
+const EXTRACT_VERBS =
+  String.raw`(?:reveal|print|repeat|show|output|dump|display|leak|list|recite|summari[sz]e|paste|give me|tell me|send me|what is|what's|what are|what were|what was)`;
+const EXTRACT_ADJS = String.raw`(?:full|exact|original|hidden|initial|secret|complete|entire|whole|real)`;
+
+const INJECTION_PATTERNS = [
+  ...OVERRIDE_PATTERNS,
+  // Changing identity. Only "you are now" followed by an identity or rules change:
+  // "So you are now a freelancer?" or "I heard you are now in London" pass.
+  /\byou are now (?:an? |the |my )?(?:unrestricted|uncensored|unfiltered|jailbroken|evil|dan\b|in (?:developer|god|dan|admin|debug|jailbreak) mode|(?:a )?(?:different|new) (?:ai|assistant|bot|model|persona|character)|no longer (?:bound|restricted|limited|an? (?:ai|assistant|bot))|free (?:from|of)|going to (?:ignore|forget|disregard|break|bypass))/i,
+  /\byou(?: are|'re) no longer (?:bound|restricted|limited) by\b/i,
+  /\bfrom now on,? (?:you (?:will|must|shall|are going to) (?:answer|respond|ignore|act|obey|reply|only|say)|act as|ignore|answer only)\b/i,
+  /\bact as (?:an unrestricted|an? (?:unfiltered|uncensored|evil|jailbroken)|a (?:different|new) (?:ai|assistant|bot|model|persona|character))\b/i,
+  /\bpretend (?:that )?(?:you are|you're|to be) (?:an? )?(?:unrestricted|unfiltered|uncensored|evil|jailbroken|different (?:ai|assistant|bot|model)|another (?:ai|assistant|bot|model)|(?:ai|assistant|bot|model) (?:without|with no) (?:rules|restrictions|limits))\b/i,
+  /\b(?:enable|enter|activate|switch to|turn on|go into) (?:developer|god|admin|debug|jailbreak|unrestricted|dan) mode\b/i,
+  // "jailbreak" on its own is allowed: "do you do LLM jailbreak testing?" is a real question.
+  /\bdo anything now\b/i,
+  /\b(?:[Yy]ou are|[Yy]ou're|[Aa]ct as|[Bb]e) (?:now )?DAN\b|\bDAN mode\b/,
+  // Extracting the prompt. "system prompt" alone is allowed, so "have you built a
+  // system prompt for a chatbot?" passes; asking for this bot's prompt does not.
+  // "the prompt library you built" and "your prompt engineering experience" pass.
+  new RegExp(String.raw`\b${EXTRACT_VERBS} (?:me )?(?:all )?(?:of )?(?:your|the|its) (?:${EXTRACT_ADJS} )*(?:system )?prompt\b(?! (?:engineering|engineer|library|libraries|templates?|design|writing|you|i|we|for|that|which|on|about|in)\b)`, 'i'),
+  new RegExp(String.raw`\b${EXTRACT_VERBS} (?:me )?(?:all )?(?:of )?(?:your|its|the) (?:${EXTRACT_ADJS} |system )+instructions\b`, 'i'),
+  // "your instructions" on their own, but not "your instructions for setting up X".
+  new RegExp(String.raw`\b${EXTRACT_VERBS} (?:me )?(?:all )?(?:of )?your instructions\b(?! (?:for|on|about|to|regarding|when|how|if))`, 'i'),
+  /\b(?:rules|instructions) (?:were|have) you (?:been )?given\b/i,
+  /\b(?:repeat|print|output|echo|recite) (?:everything|all|all the text|the (?:text|words|content|messages?)) above\b/i,
+];
+
+// Text that should never appear in a reply. These are headings from the system
+// prompt (prompt.js): if the model quotes its own instructions, the output guard
+// replaces the reply with the fallback answer.
+const LEAK_MARKERS = [
+  /\bRULES: follow these\b/, /\bAPPROVED PROFILE CONTEXT\b/, /\bAPPROVED TOPICS:/,
+  /\bBLOCKED TOPICS \(refuse/, /\bCONTACT METHODS AVAILABLE:/, /\bANSWER LENGTH:/,
+  /\bHierarchy: these rules\b/i,
+];
+
+// Cleans the text that is sent to the AI: removes control characters and the
+// invisible characters that can hide instructions (zero-width spaces, direction
+// overrides), and limits blank lines. Characters that real languages and emoji
+// need (such as the zero-width joiner) are kept. Non-strings are returned
+// unchanged so the size guard can reject them.
+export function normaliseMessage(message) {
+  if (typeof message !== 'string') return message;
+  return message
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '')
+    .replace(/[\u200B\u200E\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/g, '')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+// Cyrillic and Greek letters that look like Latin ones, used to write
+// "system prompt" with a Cyrillic "y" (\u0443) so a pattern does not match.
+const LOOKALIKES = {
+  '\u0430': 'a', '\u0432': 'b', '\u0435': 'e', '\u0451': 'e', '\u043A': 'k', '\u043C': 'm',
+  '\u043D': 'h', '\u043E': 'o', '\u0440': 'p', '\u0441': 'c', '\u0442': 't', '\u0443': 'y',
+  '\u0445': 'x', '\u0456': 'i', '\u0457': 'i', '\u0458': 'j', '\u0455': 's', '\u0501': 'd',
+  '\u051B': 'q', '\u051D': 'w', '\u0261': 'g', '\u03B1': 'a', '\u03B5': 'e', '\u03B9': 'i',
+  '\u03BA': 'k', '\u03BD': 'v', '\u03BF': 'o', '\u03C1': 'p', '\u03C4': 't', '\u03C5': 'u',
+  '\u03C7': 'x',
+};
+
+// Digits and symbols used as letters ("ign0re", "1gnore"), mapped only inside
+// or at the start of a word, so "Web3", "B2B" and "10 years" are left alone.
+const LEET = { '0': 'o', '1': 'i', '3': 'e', '4': 'a', '5': 's', '7': 't', '@': 'a', '$': 's' };
+
+// A copy of the text used only for the pattern checks, never sent to the AI.
+// It folds the tricks used to slip past patterns: full-width and styled letters
+// (NFKC), look-alike letters, digits used as letters, every invisible character,
+// and newlines, hyphens, underscores or dots used in place of spaces.
+export function textForChecks(message) {
+  if (typeof message !== 'string') return message;
+  return message
+    .normalize('NFKC')
+    .replace(/[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180E\u200B-\u200F\u202A-\u202E\u2060-\u206F\u3164\uFE00-\uFE0F\uFEFF\uFFA0]/g, '')
+    .replace(/[\u0000-\u001F\u007F-\u009F]/g, ' ')
+    .replace(/[\u0370-\u03FF\u0400-\u052F\u0261]/g, ch => LOOKALIKES[ch.toLowerCase()] ?? ch)
+    .replace(/(?<=\p{L})[013457@$](?=\p{L})|(?<![\p{L}\p{N}])[013457@$](?=\p{L}{2,})/gu, ch => LEET[ch])
+    .replace(/(?<=\p{L})[-_.*~]+(?=\p{L})/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 // In-memory rate limit store (per-isolate lifetime: see wrangler.toml note)
 const rateLimitStore = new Map();
@@ -61,11 +170,19 @@ export function guardWidgetToken(request, env) {
   const expected = env.WIDGET_TOKEN;
   if (!expected) return null; // Not configured: allow (dev mode)
   const sent = request.headers.get('X-Widget-Token') ?? '';
-  if (sent !== expected) {
+  if (!sameText(sent, expected)) {
     console.warn('[guard:token] Invalid or missing widget token');
     return 'Unauthorized.';
   }
   return null;
+}
+
+// Compares two strings in time that does not depend on where they first differ.
+function sameText(a, b) {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
 }
 
 // Fixed-window rate limit: allows up to security.rateLimitRpm requests per IP per minute.
@@ -144,25 +261,15 @@ export function guardSessionLength(history, config) {
   return null;
 }
 
-// Assistant turns in the history are checked only for attempts to override the
-// rules. The bot's own real replies can say things like "I can't share my system
-// prompt", and that must not block the rest of the conversation.
-const ASSISTANT_TURN_PATTERNS = [
-  /ignore (previous|above|all) instructions/i,
-  /forget (everything|all|your instructions)/i,
-  /override (your|the) (rules|instructions)/i,
-  /disregard (your|the|previous)/i,
-];
-
 // Blocks common prompt injection attempts: phrases visitors use to try to
 // override the system prompt, extract instructions, or change the bot's identity.
 // Checks the new message and the history, because the browser sends the history
 // and can put anything in it, including made-up "assistant" turns.
 // This is a pre-filter; the system prompt itself also enforces the hierarchy as a second layer.
 export function guardInjection(message, history = []) {
-  const checks = [[message, INJECTION_PATTERNS]];
+  const checks = [[textForChecks(message), INJECTION_PATTERNS]];
   for (const item of history) {
-    checks.push([item?.content, item?.role === 'assistant' ? ASSISTANT_TURN_PATTERNS : INJECTION_PATTERNS]);
+    checks.push([textForChecks(item?.content), item?.role === 'assistant' ? ASSISTANT_TURN_PATTERNS : INJECTION_PATTERNS]);
   }
   for (const [text, patterns] of checks) {
     if (typeof text !== 'string') continue;
@@ -208,6 +315,10 @@ export function guardOutput(reply, ownerName, hasContactButtons = true) {
   const fallback = fallbackReply(ownerName, hasContactButtons);
 
   if (typeof reply !== 'string' || reply.trim().length === 0) return fallback;
+  if (LEAK_MARKERS.some(marker => marker.test(reply))) {
+    console.warn('[guard:output] Reply quoted the instructions: replaced with the fallback.');
+    return fallback;
+  }
 
   const MAX_CHARS = 1500;
   if (reply.length <= MAX_CHARS) return reply.trim();

@@ -5,12 +5,20 @@
   const _thisScript = document.currentScript;
 
   function init() {
+  // Load once: a second copy of the script (for example from a framework that
+  // mounts a component twice) must not add a second chat button.
+  if (document.getElementById('prb-host')) return;
+
   // Config from script tag
   const script       = _thisScript || document.querySelector('[data-worker]');
   const WORKER_URL   = (script && script.dataset.worker)  || '';
   const WIDGET_TOKEN = (script && script.dataset.token)   || '';
   const BOT_NAME     = (script && script.dataset.name)    || 'Assistant';
   const DATA_ACCENT  = safeColour(script && script.dataset.accent);
+  // Text and icons drawn ON the accent colour. White suits dark accents; a light accent needs dark text.
+  const DATA_TEXT    = safeColour(script && script.dataset.accentText);
+  // Accent for links, borders and suggestion chips on the white panel. Defaults to the accent itself.
+  const DATA_INK     = safeColour(script && script.dataset.accentInk);
   const WELCOME      = (script && script.dataset.welcome) || 'Hi! Ask me anything.';
   let   MAX_LENGTH   = 500; // replaced by the worker's security.maxMessageLength once /widget-config loads
   const TIMEOUT_MS   = 30000;
@@ -35,8 +43,11 @@
   const host = document.createElement('div');
   host.setAttribute('id', 'prb-host');
   host.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:2147483647;';
-  // data-accent on the script tag wins; otherwise ui.accentColor from the worker is applied later.
+  // data-accent and data-accent-text on the script tag win; otherwise ui.accentColor and
+  // ui.accentTextColor from the worker are applied once /widget-config loads.
   host.style.setProperty('--prb-accent', DATA_ACCENT || '#0055ff');
+  host.style.setProperty('--prb-accent-text', DATA_TEXT || '#fff');
+  host.style.setProperty('--prb-accent-ink', DATA_INK || 'var(--prb-accent)');
   document.body.appendChild(host);
 
   // Shadow DOM isolates widget styles from the host page completely.
@@ -52,7 +63,7 @@
     display: flex; align-items: center; justify-content: center;
     box-shadow: 0 2px 12px rgba(0,0,0,0.18);
     transition: transform 0.15s ease, box-shadow 0.15s ease;
-    color: #fff;
+    color: var(--prb-accent-text);
   }
   #toggle:hover { transform: scale(1.06); box-shadow: 0 4px 20px rgba(0,0,0,0.22); }
   #toggle:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
@@ -81,14 +92,14 @@
     width: 36px; height: 36px; border-radius: 50%;
     background: rgba(255,255,255,0.2);
     display: flex; align-items: center; justify-content: center;
-    font-size: 14px; font-weight: 700; color: #fff;
+    font-size: 14px; font-weight: 700; color: var(--prb-accent-text);
     flex-shrink: 0;
   }
   #header-info { display: flex; flex-direction: column; gap: 3px; }
-  #header-name { font-size: 14px; font-weight: 600; color: #fff; line-height: 1; }
+  #header-name { font-size: 14px; font-weight: 600; color: var(--prb-accent-text); line-height: 1; }
   #header-status {
     display: flex; align-items: center; gap: 5px;
-    font-size: 11px; color: rgba(255,255,255,0.78); line-height: 1;
+    font-size: 11px; color: color-mix(in srgb, var(--prb-accent-text) 78%, transparent); line-height: 1;
   }
   #header-status::before {
     content: ''; width: 6px; height: 6px;
@@ -96,12 +107,12 @@
   }
   #close-btn {
     width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
-    background: rgba(255,255,255,0.15); border: none; color: #fff;
+    background: rgba(255,255,255,0.15); border: none; color: var(--prb-accent-text);
     display: flex; align-items: center; justify-content: center;
     cursor: pointer; transition: background 0.14s;
   }
   #close-btn:hover { background: rgba(255,255,255,0.28); }
-  #close-btn:focus-visible { outline: 2px solid rgba(255,255,255,0.6); border-radius: 50%; }
+  #close-btn:focus-visible { outline: 2px solid var(--prb-accent-text); border-radius: 50%; }
   #close-btn svg { width: 14px; height: 14px; pointer-events: none; }
 
   #messages {
@@ -120,7 +131,7 @@
     line-height: 1.52; word-break: break-word; font-size: 14px;
   }
   .msg.user {
-    align-self: flex-end; background: var(--prb-accent); color: #fff;
+    align-self: flex-end; background: var(--prb-accent); color: var(--prb-accent-text);
     border-radius: 18px 18px 4px 18px;
   }
   .msg.bot {
@@ -131,8 +142,8 @@
     align-self: flex-start; background: #fef2f2; color: #b91c1c;
     border-radius: 4px 18px 18px 18px; font-size: 13px;
   }
-  .msg a { color: var(--prb-accent); text-decoration: underline; }
-  .msg.user a { color: rgba(255,255,255,0.85); }
+  .msg a { color: var(--prb-accent-ink); text-decoration: underline; }
+  .msg.user a { color: var(--prb-accent-text); }
 
   .typing {
     align-self: flex-start; display: flex; gap: 4px; align-items: center;
@@ -159,7 +170,7 @@
     transition: background 0.14s, transform 0.12s; color: #444;
   }
   .cta-btn:hover { background: #e8e8ea; transform: scale(1.1); }
-  .cta-btn:focus-visible { outline: 2px solid var(--prb-accent); outline-offset: 2px; }
+  .cta-btn:focus-visible { outline: 2px solid var(--prb-accent-ink); outline-offset: 2px; }
   .cta-btn svg { width: 18px; height: 18px; pointer-events: none; }
   .cta-btn[data-type="linkedin"] { color: #0077b5; }
   .cta-btn[data-type="github"]   { color: #24292e; }
@@ -184,7 +195,7 @@
 
   #send-btn {
     width: 38px; height: 38px; flex-shrink: 0;
-    background: var(--prb-accent); color: #fff;
+    background: var(--prb-accent); color: var(--prb-accent-text);
     border: none; border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
     cursor: pointer;
@@ -192,7 +203,7 @@
   }
   #send-btn:hover:not(:disabled) { transform: scale(1.08); }
   #send-btn:disabled { opacity: 0.32; cursor: not-allowed; }
-  #send-btn:focus-visible { outline: 2px solid #fff; outline-offset: -3px; }
+  #send-btn:focus-visible { outline: 2px solid var(--prb-accent-text); outline-offset: -3px; }
   #send-btn svg { width: 16px; height: 16px; pointer-events: none; margin-left: 2px; }
 
   #char-hint {
@@ -204,13 +215,13 @@
 
   .suggestions { align-self: flex-start; display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 0 6px; }
   .suggestion-btn {
-    background: none; border: 1px solid var(--prb-accent); color: var(--prb-accent);
+    background: none; border: 1px solid var(--prb-accent-ink); color: var(--prb-accent-ink);
     border-radius: 20px; padding: 5px 12px;
     font-family: inherit; font-size: 13px; cursor: pointer;
     transition: background 0.14s, color 0.14s; white-space: nowrap;
   }
-  .suggestion-btn:hover { background: var(--prb-accent); color: #fff; }
-  .suggestion-btn:focus-visible { outline: 2px solid var(--prb-accent); outline-offset: 2px; }
+  .suggestion-btn:hover { background: var(--prb-accent); border-color: var(--prb-accent); color: var(--prb-accent-text); }
+  .suggestion-btn:focus-visible { outline: 2px solid var(--prb-accent-ink); outline-offset: 2px; }
 
   @media (max-width: 440px) {
     #panel { width: calc(100vw - 32px); right: -8px; bottom: 68px; }
@@ -223,12 +234,12 @@
   </svg>
 </button>
 
-<div id="panel" role="dialog" aria-label="${BOT_NAME} chat" aria-modal="false">
+<div id="panel" role="dialog" aria-label="${escapeHtml(BOT_NAME)} chat" aria-modal="false">
   <div id="panel-header">
     <div id="header-left">
-      <div id="avatar" aria-hidden="true">${AVATAR_LETTER}</div>
+      <div id="avatar" aria-hidden="true">${escapeHtml(AVATAR_LETTER)}</div>
       <div id="header-info">
-        <div id="header-name">${BOT_NAME}</div>
+        <div id="header-name">${escapeHtml(BOT_NAME)}</div>
         <div id="header-status">Online</div>
       </div>
     </div>
@@ -293,6 +304,9 @@
   }
 
   toggleBtn.addEventListener('click', () => isOpen ? closePanel() : openPanel());
+  // Lets the host page open the chat from its own buttons or links:
+  //   window.dispatchEvent(new Event('portfolio-chatbot:open'))
+  window.addEventListener('portfolio-chatbot:open', () => { if (!isOpen) openPanel(); });
   closeBtn.addEventListener('click', closePanel);
 
   shadow.addEventListener('keydown', (e) => {
@@ -326,6 +340,8 @@
       remoteConfig = await resp.json();
       const remoteAccent = safeColour(remoteConfig.accentColor);
       if (!DATA_ACCENT && remoteAccent) host.style.setProperty('--prb-accent', remoteAccent);
+      const remoteText = safeColour(remoteConfig.accentTextColor);
+      if (!DATA_TEXT && remoteText) host.style.setProperty('--prb-accent-text', remoteText);
       const remoteMax = Number(remoteConfig.maxMessageLength);
       if (Number.isInteger(remoteMax) && remoteMax > 0) MAX_LENGTH = remoteMax;
       if (remoteConfig.botName) {
@@ -537,6 +553,14 @@
   };
 
   } // end init()
+
+  // The bot name from the script tag goes into the widget's HTML, so characters
+  // like < and " are escaped and the name is always shown as plain text.
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, ch => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    })[ch]);
+  }
 
   // Accepts only plain colour values, so a config value cannot inject CSS.
   function safeColour(value) {

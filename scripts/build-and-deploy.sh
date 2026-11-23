@@ -579,15 +579,18 @@ if chat_page:
         f'></iframe>'
     )
 
-base44_lines = ['import { useEffect } from "react";', '', 'export default function ChatWidget() {', '  useEffect(() => {', '    const s = document.createElement("script");']
+# React component (for React, Next.js and site builders that use React).
+# The widget stays on the page once loaded, so the component adds the script
+# only once, even if the component mounts again.
+react_lines = ['import { useEffect } from "react";', '', 'export default function ChatWidget() {', '  useEffect(() => {', '    if (document.querySelector("script[data-portfolio-chatbot]")) return;', '    const s = document.createElement("script");', '    s.dataset.portfolioChatbot = "";']
 if widget_js:
-    base44_lines.append(f'    s.src = "{widget_js}";')
+    react_lines.append(f'    s.src = "{widget_js}";')
 if worker_url:
-    base44_lines.append(f'    s.dataset.worker = "{worker_url}";')
+    react_lines.append(f'    s.dataset.worker = "{worker_url}";')
 if token:
-    base44_lines.append(f'    s.dataset.token = "{token}";')
-base44_lines += ['    s.async = true;', '    document.body.appendChild(s);', '    return () => document.body.removeChild(s);', '  }, []);', '  return null;', '}']
-base44_component = '\n'.join(base44_lines)
+    react_lines.append(f'    s.dataset.token = "{token}";')
+react_lines += ['    s.async = true;', '    document.body.appendChild(s);', '  }, []);', '  return null;', '}']
+react_component = '\n'.join(react_lines)
 
 # Write setup/embed.html
 embed_html = f"""<!DOCTYPE html>
@@ -629,9 +632,9 @@ Standalone  : {escape(chat_page)}</pre>
   <p>Add before <code>&lt;/body&gt;</code> on any page:</p>
   <pre>{escape(script_tag)}</pre>
 
-  <h2>Option 2 — Base44 component</h2>
-  <p>Replace your ChatWidget component with:</p>
-  <pre>{escape(base44_component)}</pre>
+  <h2>Option 2 — React component</h2>
+  <p>For React, Next.js and site builders that use React. Add this component once, for example in your layout:</p>
+  <pre>{escape(react_component)}</pre>
 
   <h2>Option 3 — Standalone page (share or iframe)</h2>
   <p>The standalone chat page can be shared as a direct link, or embedded in a page via iframe:</p>

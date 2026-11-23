@@ -56,6 +56,8 @@
 
   "ui": {
     "accentColor": "#0055ff",
+    "accentTextColor": null,
+    "_accentTextColorNote": "Colour of text and icons on the accent colour. null = white. Use a dark colour, e.g. #111111, if your accent is light.",
     "welcomeMessage": "Hi! Ask me anything.",
     "suggestedQuestions": [
       "What do you help with?",

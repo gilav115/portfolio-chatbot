@@ -23,6 +23,7 @@ import {
   guardOrigin, guardWidgetToken, guardRateLimit,
   guardMessageSize, guardSessionLength, guardInjection,
   guardTopic, guardOutput, normaliseOrigin, guardSharedRateLimit,
+  normaliseMessage,
 } from './guards.js';
 
 // Matched as whole words, so "rate" does not match "integrate" or "accurate".
@@ -76,6 +77,7 @@ async function handleRequest(request, env) {
       botName:            config.botName,
       welcomeMessage:     config.ui?.welcomeMessage ?? `Hi! I'm ${config.botName}. How can I help?`,
       accentColor:        config.ui?.accentColor ?? '#0055ff',
+      accentTextColor:    config.ui?.accentTextColor ?? null,
       suggestedQuestions: config.ui?.suggestedQuestions ?? [],
       maxMessageLength:   config.security?.maxMessageLength ?? 500,
     }, 200, request, config);
@@ -109,7 +111,12 @@ async function handleChat(request, env, config) {
     return buildResponse({ error: 'Invalid request.' }, 400, request, config);
   }
 
-  const { message, history = [] } = body;
+  // Hidden characters are removed before any check, so the checks and the AI see the same text.
+  // History items keep only role and content: anything else the browser adds is dropped.
+  const message = normaliseMessage(body.message);
+  const history = Array.isArray(body.history)
+    ? body.history.map(item => (item && typeof item === 'object' ? { role: item.role, content: normaliseMessage(item.content) } : item))
+    : (body.history ?? []);
 
   const sizeError    = guardMessageSize(message, config);
   if (sizeError) return buildResponse({ error: sizeError }, 400, request, config);
@@ -188,11 +195,22 @@ function buildCTAs(contactMethods) {
 // Supported: 'openai' (default), 'anthropic'.
 // Set LLM_API_KEY as a Cloudflare secret (npx wrangler secret put LLM_API_KEY).
 async function callLLM(systemPrompt, history, message, env, config) {
+  // Local testing without an API key: put LLM_MOCK=1 in worker/.dev.vars.
+  // Never set it on a live worker: every reply would be a test reply.
+  if (env.LLM_MOCK === '1' || env.LLM_MOCK === 'true') return mockReply(systemPrompt, history, message);
+
   const provider = config.llm?.provider ?? 'openai';
   if (provider === 'anthropic') {
     return callAnthropic(systemPrompt, history, message, env, config);
   }
   return callOpenAI(systemPrompt, history, message, env, config);
+}
+
+// Test reply for local development. It calls no AI, and shows enough of the
+// request to prove the setup works: the question, the profile size and the history.
+function mockReply(systemPrompt, history, message) {
+  return `Test reply (LLM_MOCK is on, no AI was called). You asked: "${message.slice(0, 80)}". ` +
+    `The prompt has ${systemPrompt.length} characters and the chat has ${history.length} earlier messages.`;
 }
 
 // OpenAI Chat Completions API.

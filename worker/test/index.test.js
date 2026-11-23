@@ -104,6 +104,32 @@ describe('POST /chat', () => {
     expect(llmBody.temperature).toBeUndefined()
   })
 
+  it('sends the AI only role and content from the history, without hidden characters', async () => {
+    const worker = await loadWorker()
+    await worker.fetch(chatRequest({
+      message: 'hel\u200Blo there',
+      history: [{ role: 'user', content: 'h\u200Bi', name: 'x', extra: { a: 1 } }, { role: 'assistant', content: 'Hello!' }],
+    }), envWith())
+    expect(llmBody.messages.slice(1)).toEqual([
+      { role: 'user', content: 'hi' },
+      { role: 'assistant', content: 'Hello!' },
+      { role: 'user', content: 'hello there' },
+    ])
+  })
+
+  it('gives a test reply without calling the AI when LLM_MOCK is on', async () => {
+    const worker = await loadWorker()
+    const res = await worker.fetch(chatRequest({ message: 'hello there' }), envWith({}, { LLM_MOCK: '1' }))
+    expect(fetch).not.toHaveBeenCalled()
+    expect((await res.json()).reply).toMatch(/^Test reply \(LLM_MOCK is on/)
+  })
+
+  it('calls the AI when LLM_MOCK is any other value', async () => {
+    const worker = await loadWorker()
+    await worker.fetch(chatRequest({ message: 'hello there' }), envWith({}, { LLM_MOCK: '0' }))
+    expect(fetch).toHaveBeenCalled()
+  })
+
   it('treats the default OpenAI model as a reasoning model', async () => {
     const worker = await loadWorker()
     await worker.fetch(chatRequest({ message: 'hello there' }), envWith())

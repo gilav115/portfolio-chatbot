@@ -161,6 +161,16 @@ The name, welcome message, accent colour and suggested questions come from `setu
 | `data-name` | Name displayed in the chat header |
 | `data-accent` | Accent colour, for example `#0055ff` |
 | `data-welcome` | First message visitors see when they open the widget |
+| `data-accent-text` | Colour of text and icons drawn on the accent colour. Default `#fff`. Use a dark colour if your accent is light |
+| `data-accent-ink` | Colour of links and suggestion buttons on the white panel. Defaults to the accent colour |
+
+To open the chat from your own button or link, send this event from the page once the widget has loaded (for example when a visitor clicks your button):
+
+```js
+window.dispatchEvent(new Event('portfolio-chatbot:open'))
+```
+
+For React or Next.js sites, `setup/embed.html` also has a ready React component.
 
 
 ## Getting an API key
@@ -241,6 +251,7 @@ All optional. Only the methods you configure get shown as buttons.
 | Field | Default | Description |
 |---|---|---|
 | `ui.accentColor` | `"#0055ff"` | Button and icon colour |
+| `ui.accentTextColor` | `null` | Text and icon colour on the accent colour. `null` means white. Use a dark colour if your accent is light |
 | `ui.welcomeMessage` | auto | First message the visitor sees |
 | `ui.suggestedQuestions` | `[]` | Quick-reply buttons shown below the welcome message |
 
@@ -251,6 +262,12 @@ All optional. Only the methods you configure get shown as buttons.
 
    ```
    LLM_API_KEY=your-key
+   ```
+
+   To test without an API key, use this line instead. The bot then gives test replies and calls no AI:
+
+   ```
+   LLM_MOCK=1
    ```
 
 2. Start the worker with your real `setup/` files:
@@ -269,9 +286,10 @@ Locally, the widget token and origin checks are off, so you can test freely. Use
 * All secrets are encrypted Cloudflare Worker secrets: never in source code or git history
 * `WIDGET_TOKEN` and `allowedOrigins` stop other websites from embedding your bot. They do not stop a determined person: the token is visible in your page source, and scripts outside a browser can send any `Origin` header
 * A per-visitor rate limit slows down abuse: 10 messages per minute by default, shared by all copies of the worker in a Cloudflare location (Cloudflare's rate limiting binding, set in `worker/wrangler.toml`). It is approximate by design, and there is no overall spending cap, so also set a monthly budget limit with your AI provider
-* Every visitor message, and the chat history the browser sends with it, is checked before reaching the AI: size, injection patterns, topic keywords
+* Every visitor message, and the chat history the browser sends with it, is checked before reaching the AI: size, prompt-injection phrases, topic keywords. Hidden characters that could hide an attack are removed first
 * The system prompt enforces strict context boundaries as a second layer
-* Replies are sanitised and length-capped before being sent back to the visitor
+* Replies are length-capped before being sent back to the visitor. A reply that quotes the bot's own instructions is replaced with the fallback answer
+* The bot says it is an AI assistant representing you, not you, if a visitor asks
 * Conversation history is in memory only: never logged, never persisted
 
 

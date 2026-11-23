@@ -7,6 +7,8 @@
 # setup/config.json and setup/profile/*.md to it with --var.
 # Put your API key in worker/.dev.vars (gitignored):
 #   LLM_API_KEY=sk-...
+# Or test without a key, with replies that call no AI:
+#   LLM_MOCK=1
 
 set -euo pipefail
 
@@ -22,6 +24,7 @@ fi
 
 if [ ! -f "$WORKER_DIR/.dev.vars" ]; then
   echo "  warn     worker/.dev.vars not found. Create it with one line: LLM_API_KEY=your-key"
+  echo "           Or, to test without a key, with the line: LLM_MOCK=1"
 fi
 
 # Same rules as the deploy script: files that still have the example marker are skipped.
