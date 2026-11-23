@@ -28,7 +28,7 @@ jobs:
         working-directory: worker
 
   lint-scripts:
-    name: Bash checks
+    name: Bash syntax check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
