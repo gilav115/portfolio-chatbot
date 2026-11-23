@@ -26,7 +26,8 @@ namespace_id = "1001"
 #
 # The build script (scripts/build-and-deploy.sh) sets these automatically:
 #   BOT_CONFIG_JSON  — contents of setup/config.json
-#   PROFILE_TEXT     — concatenated contents of setup/*.md
+#   PROFILE_TEXT_1, PROFILE_TEXT_2, ... — the files in setup/profile/, combined
+#                      and uploaded in pieces
 #
 # All secrets are encrypted at rest in Cloudflare. They are never in source code.
 
