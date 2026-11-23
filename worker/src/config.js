@@ -29,8 +29,8 @@ const DEFAULTS = {
     suggestedQuestions: [],
   },
   llm: {
-    // provider: 'openai' uses the OpenAI Chat Completions API (default model: gpt-4o-mini)
-    // provider: 'anthropic' uses the Anthropic Messages API (default model: claude-haiku-4-5-20251001)
+    // provider: 'openai' uses the OpenAI Chat Completions API (default model: gpt-6-luna)
+    // provider: 'anthropic' uses the Anthropic Messages API (default model: claude-haiku-5-5)
     provider: 'openai',
     model: null, // null = use the provider's recommended default (see index.js)
   },

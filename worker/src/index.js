@@ -196,14 +196,14 @@ async function callLLM(systemPrompt, history, message, env, config) {
 }
 
 // OpenAI Chat Completions API.
-// Default model: gpt-4o-mini (cheap, fast, good quality for this use case).
-// Override via llm.model in setup/config.json (e.g. "gpt-4o", "gpt-4.1-mini", "gpt-5-mini").
-// Reasoning models (o-series, gpt-5) reject temperature, and spend part of the
-// token budget on hidden reasoning, so they get a larger budget and low effort.
+// Default model: gpt-6-luna (cheap, fast, good quality for this use case).
+// Override via llm.model in setup/config.json (e.g. "gpt-6.1-terra", "gpt-4.1").
+// Reasoning models (o-series, gpt-5 and later) reject temperature, and spend part
+// of the token budget on hidden reasoning, so they get a larger budget and low effort.
 async function callOpenAI(systemPrompt, history, message, env, config) {
-  const maxTokens = Math.ceil((config.maxAnswerWords ?? 80) * 1.5) + 50;
-  const model     = config.llm?.model ?? 'gpt-4o-mini';
-  const reasoning = /^(o\d|gpt-5)/i.test(model);
+  const maxTokens = answerTokens(config);
+  const model     = config.llm?.model ?? 'gpt-6-luna';
+  const reasoning = isOpenAIReasoningModel(model);
   const messages  = [
     { role: 'system', content: systemPrompt },
     ...history,
@@ -232,22 +232,33 @@ async function callOpenAI(systemPrompt, history, message, env, config) {
 }
 
 // Anthropic Messages API.
-// Default model: claude-haiku-4-5-20251001 (cheap, fast).
-// Override via llm.model in bot.config.json (e.g. "claude-sonnet-4-6").
-// Note: Anthropic uses a separate 'system' field instead of a system message in the array.
+// Default model: claude-haiku-5-5 (cheap, fast).
+// Override via llm.model in setup/config.json (e.g. "claude-sonnet-5-5").
+// Notes:
+// - Anthropic uses a separate 'system' field instead of a system message in the array.
+// - Current Claude models think before they answer, and thinking counts toward
+//   max_tokens, so the budget leaves room for it. Low effort keeps chat replies fast.
+//   Older models reject the effort setting, so it is sent only to models that accept it.
+// - The profile in the system prompt is the same on every request, so it is cached.
 async function callAnthropic(systemPrompt, history, message, env, config) {
-  const maxTokens = Math.ceil((config.maxAnswerWords ?? 80) * 1.5) + 50;
-  const model     = config.llm?.model ?? 'claude-haiku-4-5-20251001';
-  const messages  = [...history, { role: 'user', content: message }];
+  const model    = config.llm?.model ?? 'claude-haiku-5-5';
+  const messages = [...history, { role: 'user', content: message }];
+  const effort   = acceptsEffort(model) ? { output_config: { effort: 'low' } } : {};
 
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
       'Content-Type':      'application/json',
       'x-api-key':         env.LLM_API_KEY,
-      'anthropic-version': '2023-06-01',
+      'anthropic-version': '2026-10-21',
     },
-    body: JSON.stringify({ model, system: systemPrompt, messages, max_tokens: maxTokens }),
+    body: JSON.stringify({
+      model,
+      max_tokens: answerTokens(config) + THINKING_TOKENS,
+      ...effort,
+      system:     [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
+      messages,
+    }),
     signal: AbortSignal.timeout(25000),
   });
 
@@ -257,7 +268,41 @@ async function callAnthropic(systemPrompt, history, message, env, config) {
   }
 
   const data = await response.json();
-  return data.content?.[0]?.text ?? '';
+  return readAnthropicText(data);
+}
+
+// The answer is in the 'text' blocks. A reply can start with 'thinking' blocks,
+// so blocks are read by type, not by position. A refused reply returns '' and
+// the visitor gets the fallback answer.
+export function readAnthropicText(data) {
+  if (data?.stop_reason === 'refusal') return '';
+  return (data?.content ?? [])
+    .filter(block => block?.type === 'text' && typeof block.text === 'string')
+    .map(block => block.text)
+    .join('')
+    .trim();
+}
+
+// Extra room in max_tokens for the thinking current Claude models do first.
+export const THINKING_TOKENS = 2000;
+
+// Rough token budget for the visible answer, from the configured word limit.
+export function answerTokens(config) {
+  return Math.ceil((config.maxAnswerWords ?? 80) * 1.5) + 50;
+}
+
+// OpenAI reasoning models: the o-series and gpt-5 and later, including
+// fine-tuned copies named "ft:<model>:...".
+export function isOpenAIReasoningModel(model) {
+  return /^(?:ft:)?(?:o\d|gpt-(?:[5-9]|\d{2,}))/i.test(String(model));
+}
+
+// Claude models that accept output_config.effort: Opus 4.5 and later,
+// Sonnet 4.6 and later, Haiku 5 and later, Fable and Mythos. Unknown names
+// get no effort setting, so they use the model's own default.
+export function acceptsEffort(model) {
+  return /^claude-(?:fable|mythos|opus-(?:4-[5-9]|[5-9]|\d{2,})|sonnet-(?:4-[6-9]|[5-9]|\d{2,})|haiku-(?:[5-9]|\d{2,}))(?:\D|$)/i
+    .test(String(model));
 }
 
 function buildResponse(body, status, request, config) {

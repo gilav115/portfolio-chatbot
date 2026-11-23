@@ -166,10 +166,10 @@ The name, welcome message, accent colour and suggested questions come from `setu
 ## Getting an API key
 
 **OpenAI (default):**
-Log in at platform.openai.com, go to API keys, and create a new secret key. The default model is `gpt-4o-mini`: cheap and fast.
+Log in at platform.openai.com, go to API keys, and create a new secret key. The default model is `gpt-6-luna`: cheap and fast.
 
 **Anthropic Claude:**
-Log in at console.anthropic.com, go to API keys, and create a key. To use it, set `"llm": { "provider": "anthropic" }` in your `setup/config.json`. The default model is `claude-haiku-4-5-20251001`.
+Log in at console.anthropic.com, go to API keys, and create a key. To use it, set `"llm": { "provider": "anthropic" }` in your `setup/config.json`. The default model is `claude-haiku-5-5`: cheap and fast.
 
 Both work equally well for this use case. If you are not sure, start with OpenAI.
 
@@ -225,7 +225,7 @@ All optional. Only the methods you configure get shown as buttons.
 | Field | Default | Description |
 |---|---|---|
 | `llm.provider` | `"openai"` | `openai` or `anthropic` |
-| `llm.model` | `null` | Leave null to use the provider default. OpenAI: `gpt-4o-mini`. Anthropic: `claude-haiku-4-5-20251001`. |
+| `llm.model` | `null` | Leave null to use the provider default. OpenAI: `gpt-6-luna`. Anthropic: `claude-haiku-5-5`. |
 
 **Security**
 
@@ -279,8 +279,9 @@ Locally, the widget token and origin checks are off, so you can test freely. Use
 
 * Cloudflare Workers free tier: 100,000 requests per day
 * The widget worker that hosts `widget.js` is covered by the same free tier
-* OpenAI gpt-4o-mini: roughly $0.01 per 1,000 messages
-* Anthropic claude-haiku: similar cost range
+* OpenAI `gpt-6-luna` or Anthropic `claude-haiku-5-5`: both charge $0.10 per million input tokens and $0.50 per million output tokens
+* Each message sends your profile and the recent chat to the AI, so a message costs about $0.0003 to $0.001 with a typical profile. That is roughly $0.30 to $1 per 1,000 messages. A bigger profile costs more
+* With Anthropic, a profile of a few hundred words or more is cached for about 5 minutes. Later messages in the same chat then cost less, and the first one costs a little more
 
 A personal site with a few hundred visitors per day costs essentially nothing to run.
 
