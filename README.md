@@ -6,7 +6,6 @@
 </p>
 
 <p align="center">
-  <a href="../../actions/workflows/ci.yml"><img src="../../actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/runs%20on-Cloudflare%20Workers-f38020.svg" alt="Runs on Cloudflare Workers">
 </p>
