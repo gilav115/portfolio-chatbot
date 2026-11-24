@@ -2,11 +2,11 @@
 
 # Contact
 
-Primary contact: hello@alexchen.co
+Primary contact: hello@example.com
 
-Calendar: https://cal.com/alexchen/intro
+Calendar: https://cal.com/YOUR_USERNAME/intro
 
-LinkedIn: https://linkedin.com/in/alexchen
+LinkedIn: https://linkedin.com/in/YOUR_USERNAME
 
 For project enquiries, an introductory call is the best starting point. The calendar link above goes directly to a 30-minute slot. No prep needed: just a conversation.
 
