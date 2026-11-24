@@ -10,9 +10,9 @@
   const WORKER_URL   = (script && script.dataset.worker)  || '';
   const WIDGET_TOKEN = (script && script.dataset.token)   || '';
   const BOT_NAME     = (script && script.dataset.name)    || 'Assistant';
-  const ACCENT       = (script && script.dataset.accent)  || '#0055ff';
+  const DATA_ACCENT  = safeColour(script && script.dataset.accent);
   const WELCOME      = (script && script.dataset.welcome) || 'Hi! Ask me anything.';
-  const MAX_LENGTH   = 500;
+  let   MAX_LENGTH   = 500; // replaced by the worker's security.maxMessageLength once /widget-config loads
   const TIMEOUT_MS   = 30000;
 
   if (!WORKER_URL) {
@@ -35,6 +35,8 @@
   const host = document.createElement('div');
   host.setAttribute('id', 'prb-host');
   host.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:2147483647;';
+  // data-accent on the script tag wins; otherwise ui.accentColor from the worker is applied later.
+  host.style.setProperty('--prb-accent', DATA_ACCENT || '#0055ff');
   document.body.appendChild(host);
 
   // Shadow DOM isolates widget styles from the host page completely.
@@ -46,7 +48,7 @@
 
   #toggle {
     width: 52px; height: 52px; border-radius: 50%;
-    background: ${ACCENT}; border: none; cursor: pointer;
+    background: var(--prb-accent); border: none; cursor: pointer;
     display: flex; align-items: center; justify-content: center;
     box-shadow: 0 2px 12px rgba(0,0,0,0.18);
     transition: transform 0.15s ease, box-shadow 0.15s ease;
@@ -72,7 +74,7 @@
 
   #panel-header {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 14px 16px; background: ${ACCENT}; flex-shrink: 0;
+    padding: 14px 16px; background: var(--prb-accent); flex-shrink: 0;
   }
   #header-left { display: flex; align-items: center; gap: 10px; }
   #avatar {
@@ -118,7 +120,7 @@
     line-height: 1.52; word-break: break-word; font-size: 14px;
   }
   .msg.user {
-    align-self: flex-end; background: ${ACCENT}; color: #fff;
+    align-self: flex-end; background: var(--prb-accent); color: #fff;
     border-radius: 18px 18px 4px 18px;
   }
   .msg.bot {
@@ -129,7 +131,7 @@
     align-self: flex-start; background: #fef2f2; color: #b91c1c;
     border-radius: 4px 18px 18px 18px; font-size: 13px;
   }
-  .msg a { color: ${ACCENT}; text-decoration: underline; }
+  .msg a { color: var(--prb-accent); text-decoration: underline; }
   .msg.user a { color: rgba(255,255,255,0.85); }
 
   .typing {
@@ -157,7 +159,7 @@
     transition: background 0.14s, transform 0.12s; color: #444;
   }
   .cta-btn:hover { background: #e8e8ea; transform: scale(1.1); }
-  .cta-btn:focus-visible { outline: 2px solid ${ACCENT}; outline-offset: 2px; }
+  .cta-btn:focus-visible { outline: 2px solid var(--prb-accent); outline-offset: 2px; }
   .cta-btn svg { width: 18px; height: 18px; pointer-events: none; }
   .cta-btn[data-type="linkedin"] { color: #0077b5; }
   .cta-btn[data-type="github"]   { color: #24292e; }
@@ -182,7 +184,7 @@
 
   #send-btn {
     width: 38px; height: 38px; flex-shrink: 0;
-    background: ${ACCENT}; color: #fff;
+    background: var(--prb-accent); color: #fff;
     border: none; border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
     cursor: pointer;
@@ -202,13 +204,13 @@
 
   .suggestions { align-self: flex-start; display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 0 6px; }
   .suggestion-btn {
-    background: none; border: 1px solid ${ACCENT}; color: ${ACCENT};
+    background: none; border: 1px solid var(--prb-accent); color: var(--prb-accent);
     border-radius: 20px; padding: 5px 12px;
     font-family: inherit; font-size: 13px; cursor: pointer;
     transition: background 0.14s, color 0.14s; white-space: nowrap;
   }
-  .suggestion-btn:hover { background: ${ACCENT}; color: #fff; }
-  .suggestion-btn:focus-visible { outline: 2px solid ${ACCENT}; outline-offset: 2px; }
+  .suggestion-btn:hover { background: var(--prb-accent); color: #fff; }
+  .suggestion-btn:focus-visible { outline: 2px solid var(--prb-accent); outline-offset: 2px; }
 
   @media (max-width: 440px) {
     #panel { width: calc(100vw - 32px); right: -8px; bottom: 68px; }
@@ -322,6 +324,10 @@
       });
       if (!resp.ok) throw new Error('config fetch failed');
       remoteConfig = await resp.json();
+      const remoteAccent = safeColour(remoteConfig.accentColor);
+      if (!DATA_ACCENT && remoteAccent) host.style.setProperty('--prb-accent', remoteAccent);
+      const remoteMax = Number(remoteConfig.maxMessageLength);
+      if (Number.isInteger(remoteMax) && remoteMax > 0) MAX_LENGTH = remoteMax;
       if (remoteConfig.botName) {
         const headerName = shadow.getElementById('header-name');
         const avatar     = shadow.getElementById('avatar');
@@ -411,9 +417,14 @@
       signal,
     });
 
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
-    return { reply: data.reply, cta: data.cta ?? null };
+    // The worker always answers with JSON, but a proxy or Cloudflare error page may not.
+    // Never show raw parser errors to visitors.
+    let data = null;
+    try { data = await response.json(); } catch { data = null; }
+    if (!response.ok || !data || typeof data.reply !== 'string') {
+      throw new Error((data && typeof data.error === 'string' && data.error) || 'Something went wrong. Please try again.');
+    }
+    return { reply: data.reply, cta: Array.isArray(data.cta) ? data.cta : null };
   }
 
   // UI helpers
@@ -469,18 +480,35 @@
       if (match.index > last) {
         fragment.appendChild(document.createTextNode(text.slice(last, match.index)));
       }
+      const raw = trimLinkEnd(match[0]);
       const a   = document.createElement('a');
-      const raw = match[0];
       a.href   = raw.includes('@') && !raw.startsWith('http') ? `mailto:${raw}` : raw;
       a.textContent = raw;
       a.target = '_blank';
       a.rel    = 'noopener noreferrer';
       fragment.appendChild(a);
-      last = pattern.lastIndex;
+      last = match.index + raw.length;
+      pattern.lastIndex = last;
     }
     if (last < text.length) fragment.appendChild(document.createTextNode(text.slice(last)));
     return fragment;
   }
+
+  // Drops punctuation that ends a sentence or closes a bracket around a link:
+  // "see https://x.dev." and "[site](https://x.dev)" both link to https://x.dev.
+  function trimLinkEnd(url) {
+    let end = url.length;
+    while (end > 0) {
+      const ch = url[end - 1];
+      if ('.,;:!?\'"'.includes(ch)) { end--; continue; }
+      if (ch === ')' && count(url.slice(0, end), '(') < count(url.slice(0, end), ')')) { end--; continue; }
+      if (ch === ']' || ch === '}' || ch === '>') { end--; continue; }
+      break;
+    }
+    return url.slice(0, end);
+  }
+
+  function count(text, ch) { return text.split(ch).length - 1; }
 
   function scrollToBottom() { messagesEl.scrollTop = messagesEl.scrollHeight; }
 
@@ -509,6 +537,12 @@
   };
 
   } // end init()
+
+  // Accepts only plain colour values, so a config value cannot inject CSS.
+  function safeColour(value) {
+    const v = typeof value === 'string' ? value.trim() : '';
+    return /^(#[0-9a-f]{3,8}|rgba?\([\d\s.,%]+\)|hsla?\([\d\s.,%deg]+\)|[a-z]{3,20})$/i.test(v) ? v : '';
+  }
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);

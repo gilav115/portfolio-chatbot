@@ -3,6 +3,8 @@ node_modules/
 dist/
 .env
 .env.*
+.dev.vars
+.dev.vars.*
 *.secret
 .DS_Store
 Thumbs.db
