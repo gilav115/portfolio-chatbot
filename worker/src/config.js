@@ -25,6 +25,7 @@ const DEFAULTS = {
   },
   ui: {
     accentColor: '#0055ff',
+    accentTextColor: null, // text on the accent colour; null = white
     welcomeMessage: null,
     suggestedQuestions: [],
   },

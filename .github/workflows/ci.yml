@@ -41,3 +41,6 @@ jobs:
 
       - name: Check dev.sh
         run: bash -n scripts/dev.sh
+
+      - name: ShellCheck
+        run: shellcheck --version && shellcheck -S warning scripts/*.sh

@@ -99,3 +99,11 @@ describe('buildSystemPrompt', () => {
     expect(p).not.toMatch(/secret@example\.com/)
   })
 })
+
+describe('buildSystemPrompt: identity', () => {
+  it('says the bot is an AI assistant, not the person', () => {
+    const prompt = buildSystemPrompt({ ownerName: 'Sam', maxAnswerWords: 80, contactMethods: {}, blockedTopics: [], allowedTopics: [] }, '')
+    expect(prompt).toMatch(/^You are Sam's AI assistant/)
+    expect(prompt).toContain('you are an AI assistant representing them, not the person')
+  })
+})
