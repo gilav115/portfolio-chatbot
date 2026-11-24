@@ -51,7 +51,7 @@
     "_providerOptions": ["openai", "anthropic"],
     "_providerNote": "openai uses the OpenAI Chat Completions API. anthropic uses Anthropic Claude. Both use the same LLM_API_KEY secret.",
     "model": null,
-    "_modelNote": "null uses the provider default. openai default: gpt-4o-mini. anthropic default: claude-haiku-4-5-20251001. Other openai options: gpt-4o, gpt-4-turbo. Other anthropic options: claude-sonnet-4-6."
+    "_modelNote": "null uses the provider default. openai default: gpt-6-luna. anthropic default: claude-haiku-5-5. Other openai options: gpt-6.1-terra. Other anthropic options: claude-sonnet-5-5."
   },
 
   "ui": {

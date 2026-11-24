@@ -202,8 +202,8 @@ ALLOWED_ORIGINS="$_ANSWER"
 
 step "4 of 7   AI provider"
 
-echo "  openai     uses gpt-4o-mini (cheap, fast, default)"
-echo "  anthropic  uses claude-haiku-4-5-20251001"
+echo "  openai     uses gpt-6-luna (cheap, fast, default)"
+echo "  anthropic  uses claude-haiku-5-5 (cheap, fast)"
 echo ""
 
 ask "Provider (openai / anthropic)" "llm.provider" "openai"
